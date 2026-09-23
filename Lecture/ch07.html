@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>7장. 토크나이저 (도전편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch07">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 7 · PART III</div>
+      <div class="deck-title">토크나이저 (도전편)</div>
+      <div class="deck-sub">WebBot을 위해 — 진짜 인터넷 규모 데이터를 다루는 토크나이저</div>
+      <div class="title-badges">
+        <span class="badge">🌐 대규모 데이터</span>
+        <span class="badge">🦀 러스트/C++</span>
+        <span class="badge">🔀 대안 접근</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <p class="muted">WebBot은 CodeBot(어휘 1,000개)·StoryBot(어휘 10,000개)보다 훨씬 큰
+      <b>어휘 50,000개</b>를, 훨씬 큰 인터넷 텍스트(OpenWebText)로 학습합니다. 4장의 최적화만으로는
+      부족한 지점과, 토크나이저 설계의 더 넓은 선택지를 살펴봅니다.</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">WebBot 토크나이저 — 실전 규모로 4장 기법 적용</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">병목 지점 찾기와 저수준 언어로 속도 개선</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">특수 토큰 확장과 다른 토크나이저 방식들</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">토크나이저 없이 접근하는 방법</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">7.1 WebBot의 토크나이저</div>
+      <h1>같은 코드, 훨씬 큰 무대에서</h1>
+      <p>WebBot은 4장에서 만든 <b>StoryBot의 최적화된 BPE 구현을 그대로 재사용</b>하되, 어휘 크기와
+      데이터 규모만 훨씬 키웁니다.</p>
+      <pre class="code"><span class="k">from</span> storybot.tokenizer <span class="k">import</span> train_bpe
+
+vocab_size = <span class="hi">50000</span>                       <span class="c"># StoryBot(10,000)의 5배</span>
+file_path = <span class="s">"webbot/owt_train.txt"</span>          <span class="c"># OpenWebText: 인터넷 글 모음</span>
+merge_rules = train_bpe(file_path, vocab_size, num_processes=8, num_chunks=64)</pre>
+      <div class="analogy">
+        <div class="analogy-label">📚 비유</div>
+        <p>같은 조리법(BPE 알고리즘)이라도, 4인분 요리와 400인분 케이터링은 준비 방식 자체가
+        달라집니다. 어휘와 데이터가 커질수록 <span class="hi2">4장의 최적화(분할·병렬·캐시)가
+        선택이 아니라 필수</span>가 됩니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">7.2 병목 지점 찾기</div>
+      <h1>어디서 시간이 새는지 스톱워치로 재보기</h1>
+      <div class="analogy">
+        <div class="analogy-label">⏱️ 비유 — 요리 시간 측정</div>
+        <p>요리가 늦어질 때 "재료 손질이 오래 걸리나? 불 조절이 문제인가?"를 단계별로 재봐야
+        원인을 알 수 있습니다. 소프트웨어에서는 이를 <b>프로파일링(profiling)</b>이라 부릅니다.
+        코드의 각 부분이 전체 실행 시간 중 <span class="hi">얼마를 차지하는지 측정</span>해서,
+        무작정 최적화하는 대신 <b>가장 느린 부분부터</b> 손을 댑니다.</p>
+      </div>
+      <p class="muted">이 저장소에는 프로파일링 실습 코드가 따로 없지만, 실제로는
+      파이썬 표준 라이브러리의 <code class="inline">cProfile</code>이나 <code class="inline">line_profiler</code>
+      같은 도구로 병목을 찾습니다 — 대개 문자열 처리와 병합 반복문이 가장 무겁습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">7.3 러스트와 C++를 이용한 속도 개선</div>
+      <h1>무거운 일은 근육질 전문가에게 아웃소싱</h1>
+      <div class="analogy">
+        <div class="analogy-label">💪 비유</div>
+        <p>파이썬은 다재다능하지만 반복문이 느립니다. 병목이 된 핵심 반복 구간(병합 루프 등)만
+        <b>러스트나 C++처럼 훨씬 빠른 언어로 새로 작성</b>하고, 파이썬에서는 그 결과만 불러 쓰는
+        방식입니다 — 매니저(파이썬)는 전체를 총괄하고, 힘쓰는 작업(반복 계산)은 근육질 전문
+        일꾼(러스트/C++)에게 맡기는 것과 같습니다. 실제 프로덕션 토크나이저(예: OpenAI의
+        <code class="inline">tiktoken</code>)도 이런 방식으로 러스트로 핵심부를 구현합니다.</p>
+      </div>
+      <p class="muted">이 저장소는 순수 파이썬 구현에 집중하지만, 같은 알고리즘을 저수준 언어로
+      옮기면 보통 수십 배 이상 빨라집니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">7.4 특수 토큰 추가</div>
+      <h1>대화의 신호등과 표지판</h1>
+      <div class="analogy">
+        <div class="analogy-label">🚦 비유</div>
+        <p>1장에서는 <code class="inline">&lt;|endoftext|&gt;</code> 하나만 있었지만, 실전 챗봇은
+        <b>"여기부터 사용자 발화", "여기부터 시스템 지시", "여기부터 모델 응답"</b>처럼 더 많은
+        역할 표시가 필요합니다. 특수 토큰은 도로의 신호등·표지판처럼, 모델이 <span class="hi">"지금
+        누가 말하고 있고 어디서 멈춰야 하는지"</span>를 명확히 알게 해주는 약속된 기호입니다.</p>
+      </div>
+      <pre class="code">&lt;|user|&gt; 파이썬으로 정렬 함수 짜줘 &lt;|end|&gt;
+&lt;|assistant|&gt; def sort_list(lst): ... &lt;|end|&gt;</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">7.5 다른 토크나이저</div>
+      <h1>BPE만이 정답은 아니다</h1>
+      <table class="compare">
+        <tr><th>방식</th><th>핵심 아이디어</th><th>비유</th></tr>
+        <tr><td>BPE (이 책)</td><td>자주 붙는 쌍을 반복 병합</td><td>자주 쓰는 줄임말 만들기</td></tr>
+        <tr><td>WordPiece</td><td>병합 시 우도(likelihood) 최대화 기준 사용</td><td>"가장 그럴듯한" 조합 우선 선택</td></tr>
+        <tr><td>Unigram (SentencePiece)</td><td>큰 어휘에서 불필요한 토큰을 제거해가며 축소</td><td>과한 재료를 덜어내며 레시피 완성</td></tr>
+        <tr><td>tiktoken (OpenAI)</td><td>BPE + 러스트 고속 구현</td><td>같은 조리법, 전문 주방 설비</td></tr>
+      </table>
+      <p class="muted" style="margin-top:1em;">목적(속도, 언어 다양성, 어휘 크기)에 따라 적합한
+      방식이 달라집니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">7.6 토크나이저를 사용하지 않는 접근법</div>
+      <h1>통역사 없이 원어민처럼 바로 대화하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🗣️ 비유</div>
+        <p>토크나이저는 편리하지만 "번역 손실"이 생길 수 있습니다(예: 오타나 신조어를 이상하게 쪼갬).
+        <b>바이트/문자 단위로 직접 처리</b>하는 모델은 통역사 없이 원어(바이트)로 바로 대화하는
+        것과 같아서 손실은 없지만, <span class="hi">문장이 훨씬 길어져</span> 더 많은 계산이 필요합니다.
+        최근에는 이 둘의 장점을 섞은 바이트-레벨 하이브리드 접근도 연구되고 있습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">7.7 정리</div>
+      <h1>7장 핵심 요약</h1>
+      <ul>
+        <li>WebBot은 4장의 최적화된 BPE를 <b>어휘 50,000개 · 인터넷 규모 데이터</b>로 확장 적용</li>
+        <li><b>프로파일링</b>으로 병목을 찾고, 정말 느린 곳만 <b>러스트/C++로 아웃소싱</b></li>
+        <li><b>특수 토큰</b>을 늘려 대화의 역할과 경계를 더 세밀하게 표시</li>
+        <li>BPE 외에도 WordPiece, Unigram 등 다양한 서브워드 방식이 존재</li>
+        <li><b>토크나이저 없는 접근</b>(바이트/문자 단위)은 손실은 없지만 시퀀스가 길어지는 트레이드오프</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">➡️ 다음 시간</div>
+        <p>8장 <b>모델(도전편)</b>: FlashAttention, GQA, MoE 등 대규모 모델을 위한 효율화 기법을 살펴봅니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">병목 구간을 찾기 위해 코드 실행 시간을 부분별로 측정하는 기법을 무엇이라 하나요?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">캐싱(caching)</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">프로파일링(profiling)</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">양자화(quantization)</button>
+        </div>
+        <div class="quiz-explain">정답: 프로파일링. 코드의 각 구간이 전체 실행 시간에서 차지하는 비중을 측정해 가장 느린 부분을 찾아냅니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">토크나이저 없이 바이트 단위로 직접 처리하는 접근법의 단점은?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">번역 손실이 발생한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">시퀀스 길이가 훨씬 길어져 계산량이 늘어난다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">특수 토큰을 사용할 수 없다</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 압축이 없으므로 같은 텍스트라도 훨씬 많은 토큰(바이트)이 필요합니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch06.html">← 6장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch08.html">8장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

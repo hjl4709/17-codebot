@@ -1,0 +1,299 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>3장. 학습 (기본편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch03">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 3</div>
+      <div class="deck-title">학습 (기본편)</div>
+      <div class="deck-sub">사전 학습 → SFT → 강화 학습, CodeBot이 실제로 똑똑해지는 과정</div>
+      <div class="title-badges">
+        <span class="badge">📖 사전 학습</span>
+        <span class="badge">🎓 SFT</span>
+        <span class="badge">🏋️ GRPO</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">사전 학습 루프와 텍스트 생성(온도)</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">SFT — 모범 답안으로 대화 포맷 가르치기</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">정책 경사법 · 베이스라인 · 클리핑의 개념</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">GRPO로 CodeBot을 강화 학습시키기</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.1 사전 학습</div>
+      <h1>빈칸 채우기를 수만 번 반복하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📖 비유</div>
+        <p>긴 글을 한 칸씩 밀어서 "다음 글자는?"을 계속 묻는 <b>빈칸 채우기 문제집</b>을 통째로 풀게
+        하는 것과 같습니다. 정답은 이미 원문에 있으니, 예측이 틀릴 때마다
+        <span class="hi2">모델 내부 값을 살짝씩</span> 정답 쪽으로 고칩니다.</p>
+      </div>
+      <pre class="code"><span class="c"># 입력 x, 정답 y는 한 칸씩 밀린 같은 토큰열</span>
+x = tokens[i   : i+context_len]
+y = tokens[i+1 : i+context_len+1]
+
+logits = model(x)
+loss = cross_entropy(logits, y)   <span class="c"># 예측과 정답의 차이</span>
+loss.backward(); optimizer.step() <span class="c"># 파라미터를 조금씩 수정</span></pre>
+      <p class="muted">이 과정을 <code class="inline">max_iters</code>(예: 20,000)번 반복하며 손실(loss)이
+      점점 줄어드는 것을 확인합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.2 텍스트 생성</div>
+      <h1>온도(temperature) 다이얼로 창의성 조절</h1>
+      <div class="analogy">
+        <div class="analogy-label">🌡️ 비유</div>
+        <p>온도를 <b>0</b>으로 두면 항상 가장 확률 높은 답만 고르는 <span class="hi">모범생</span>이 되고
+        (결정적, argmax), 온도를 <b>높이면</b> 확률에 따라 무작위로 뽑아 더 <span class="hi2">즉흥적이고
+        다양한</span> 답을 냅니다.</p>
+      </div>
+      <pre class="code"><span class="k">for</span> _ <span class="k">in</span> range(max_new_tokens):
+    logits = model(ids)[:, -1, :]              <span class="c"># 마지막 위치의 예측</span>
+    <span class="k">if</span> temperature == 0:
+        next_id = logits.argmax(dim=-1)         <span class="c"># 가장 확실한 답만</span>
+    <span class="k">else</span>:
+        probs = softmax(logits / temperature)
+        next_id = torch.multinomial(probs, 1)   <span class="c"># 확률적으로 샘플링</span>
+    ids = torch.cat([ids, next_id], dim=1)      <span class="c"># 한 토큰씩 이어붙여 생성</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.3 SFT를 위한 데이터 포맷</div>
+      <h1>모범 답안집으로 과외 받기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🎓 비유</div>
+        <p>사전 학습이 "다독"이라면, SFT(지도 파인튜닝)는 <b>"질문엔 이렇게 답하세요"라는 모범 답안집</b>으로
+        진행하는 과외 수업입니다. 정해진 형식(Instruction → Response)을 반복해서 보여주면 모델이
+        <span class="hi2">대화의 틀과 태도</span>를 학습합니다.</p>
+      </div>
+      <pre class="code">### Instruction:
+Hello
+
+### Response:
+Hello. What can I help you with?&lt;|endoftext|&gt;</pre>
+      <p class="muted">이 포맷(Alpaca 스타일)으로 각 질문-답변 쌍을 토큰화해 학습 데이터로 사용합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>SFT 손실 마스킹 — 질문은 베끼고, 답만 채점</h1>
+      <div class="analogy">
+        <div class="analogy-label">✏️ 비유</div>
+        <p>시험 답안지에서 <b>"문제" 부분은 그대로 옮겨 적고 채점하지 않고, "답" 부분만 채점</b>하는 것과
+        같습니다. 프롬프트(질문) 구간의 레이블을 <code class="inline">-100</code>으로 마스킹해 손실 계산에서
+        제외하면, 모델이 <span class="hi">질문을 외우는 게 아니라 "어떻게 답할지"를 배우게</span> 됩니다.</p>
+      </div>
+      <pre class="code">prompt_ids   = tokenizer.encode(instruction_text)
+response_ids = tokenizer.encode(response_text)
+
+ids    = prompt_ids + response_ids
+labels = [-100] * len(prompt_ids) + response_ids   <span class="c"># 프롬프트 구간은 채점 제외</span>
+
+loss = cross_entropy(logits, labels, ignore_index=-100)</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.4 SFT 모델과 나누는 대화</div>
+      <h1>실전: CodeBot과 채팅해보기</h1>
+      <pre class="code"><span class="k">def</span> <span class="f">format_prompt</span>(user_message):
+    <span class="k">return</span> f<span class="s">"### Instruction:\n{user_message}\n\n### Response:\n"</span>
+
+response = generate(model, tokenizer, format_prompt(user_input))
+<span class="c"># "### Response:" 이후 텍스트만 잘라서 사용자에게 보여줌</span></pre>
+      <div class="analogy">
+        <div class="analogy-label">🏃 직접 실행해보기</div>
+        <p><code class="inline">python ch03/04_chat.py</code> — 학습된 SFT 모델을 불러와 터미널에서
+        직접 대화해볼 수 있습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide section-slide">
+    <div class="slide-inner center">
+      <div class="slide-kicker">3.5</div>
+      <h1>SFT만으론 부족하다 — 강화 학습이 필요한 이유</h1>
+      <p style="max-width:700px;margin:0 auto;">운동선수가 코치의 시범(SFT)만 보고는 실력이 한계에 부딪히듯,
+      모델도 정해진 예시를 모방하는 것만으로는 스스로 시행착오를 거쳐야 느는 능력에 닿지 못합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.5 강화 학습과 언어 모델</div>
+      <h1>스스로 풀어보고, 맞으면 칭찬받기</h1>
+      <table class="compare">
+        <tr><th></th><th>SFT (모방 학습)</th><th>강화 학습 (시행착오 학습)</th></tr>
+        <tr><td><b>비유</b></td><td>코치의 시범을 따라하기</td><td>실전 경기를 뛰며 배우기</td></tr>
+        <tr><td><b>데이터</b></td><td>정해진 정답 예시</td><td>모델이 직접 생성한 답 + 보상</td></tr>
+        <tr><td><b>한계/장점</b></td><td>예시에 없는 상황엔 약함</td><td>정답 예시 없이도 "잘함/못함"만 알면 개선 가능</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.6 정책 경사법</div>
+      <h1>강아지 훈련처럼: 잘하면 그 행동을 더</h1>
+      <div class="analogy">
+        <div class="analogy-label">🐶 비유</div>
+        <p>강아지가 우연히 "앉아"를 했을 때 간식을 주면, 강아지는 그 행동을 <b>더 자주</b> 하게 됩니다.
+        정책 경사법(policy gradient)도 똑같습니다 — 모델이 생성한 답이 <span class="hi2">보상(reward)이
+        높았다면 그 답을 낼 확률을 높이고</span>, 보상이 낮았다면 확률을 낮추는 방향으로 파라미터를 조정합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.7 베이스라인</div>
+      <h1>절대 점수가 아니라 "평균 대비"로 평가하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📊 비유 — 반 평균</div>
+        <p>90점을 받아도 반 평균이 95점이면 그리 잘한 게 아니고, 90점이 반 평균이 60점인 데서 나왔다면
+        아주 잘한 것이죠. <b>베이스라인(평균 보상)</b>을 빼서 <span class="hi">"평균보다 얼마나 잘했는가"
+        (advantage)</span>로 평가하면 학습이 훨씬 안정적입니다.</p>
+      </div>
+      <pre class="code">rewards = [calculate_reward(gt, r) <span class="k">for</span> r <span class="k">in</span> responses]
+advantages = rewards - rewards.mean()   <span class="c"># 그룹 평균 대비 상대 점수</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.8 오프-정책과 클리핑</div>
+      <h1>변화 폭에 브레이크 걸기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🥗 비유 — 급격한 다이어트 방지</div>
+        <p>답을 생성한 "옛 모델"과 지금 갱신 중인 "현재 모델"이 조금씩 달라지는데(오프-정책),
+        한 번에 너무 크게 바뀌면 요요처럼 불안정해질 수 있습니다. <b>클리핑</b>은 확률비(ratio)의
+        변화폭을 <code class="inline">[1-ε, 1+ε]</code> 범위로 제한해, <span class="hi2">점진적이고
+        안전하게</span> 조금씩만 바뀌도록 브레이크를 겁니다.</p>
+      </div>
+      <pre class="code">ratio = probs / old_probs                                   <span class="c"># 확률이 얼마나 변했나</span>
+clipped = torch.clamp(ratio, 1-epsilon, 1+epsilon) * advantages
+objective = torch.min(ratio * advantages, clipped)           <span class="c"># 더 보수적인 쪽 선택</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.9 GRPO</div>
+      <h1>그룹으로 여러 번 시도해보고 비교하기</h1>
+      <p>GRPO(Group Relative Policy Optimization)는 하나의 문제에 대해 <b>여러 개(group_size)의 답을
+      생성</b>하고, 그룹 평균 대비 잘한 답의 확률은 높이고 못한 답은 낮춥니다.</p>
+      <pre class="code"><span class="c"># CodeBot 예제: 덧셈 문제 "3+5=" 처럼 정답이 명확한 과제</span>
+prompt = <span class="s">"### Instruction:\n3+5=\n\n### Response:\n"</span>
+ground_truth = 8
+
+<span class="k">def</span> <span class="f">calculate_reward</span>(gt, response):
+    predicted = int(찾은 마지막 숫자)
+    <span class="k">return</span> 1.0 <span class="k">if</span> predicted == gt <span class="k">else</span> 0.0   <span class="c"># 정답이면 1점, 아니면 0점</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>GRPO 학습 루프</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">문제 하나당 옛 모델로 <b>8개(group_size)</b>의 답을 각각 생성</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">각 답의 <b>보상(정답 여부)</b>을 계산</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">그룹 평균 대비 <b>advantage</b> 산출 (평균보다 잘했나?)</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><b>클리핑된 목적함수</b>로 현재 모델을 여러 번 업데이트</div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-body">옛 모델을 현재 모델로 갱신하고 <b>반복</b> — 정답률이 점점 상승</div></div>
+      </div>
+      <p class="muted" style="margin-top:1em;"><code class="inline">python ch03/09_grpo.py</code> — 정답률(accuracy)이
+      학습 곡선을 따라 올라가는 것을 직접 확인할 수 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">3.10 정리</div>
+      <h1>3장 핵심 요약 — CodeBot 완성!</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>사전 학습</b>: 다음 토큰 맞히기를 반복해 언어·코드의 기본기를 습득</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>SFT</b>: 프롬프트는 마스킹하고 응답만 학습해 대화 포맷을 습득</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>강화 학습(GRPO)</b>: 여러 시도의 그룹 평균 대비 잘한 답을 강화, 클리핑으로 안정적 개선</div></div>
+      </div>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">🎉 Part I 완료</div>
+        <p>토크나이저(1장) → 모델(2장) → 학습(3장) 전 과정을 밟아 CodeBot을 완성했습니다.
+        다음은 Part II, StoryBot에서 더 발전된 기법들을 만나봅니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">SFT 학습에서 프롬프트(질문) 구간의 레이블을 -100으로 두는 이유는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">프롬프트를 더 강하게 학습시키기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">손실 계산에서 제외해 응답 생성 능력만 학습시키기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">토큰 수를 맞추기 위한 패딩이라서</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. ignore_index=-100으로 손실 계산에서 제외해, 모델이 질문을 외우는 대신 적절한 응답을 생성하는 법을 배우게 합니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">GRPO에서 "advantage"는 무엇을 의미하나요?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">모델의 학습률(learning rate)</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">같은 그룹 내 평균 보상 대비 이 답이 얼마나 더 잘했는지</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">토큰을 생성하는 데 걸린 시간</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 그룹 평균 보상을 베이스라인으로 빼서 "상대적으로 얼마나 잘했는가"를 계산한 값입니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch02.html">← 2장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch04.html">4장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

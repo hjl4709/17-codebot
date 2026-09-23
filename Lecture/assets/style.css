@@ -1,0 +1,362 @@
+/* ===== 밑바닥부터 시작하는 딥러닝 6 — 강의자료 공통 스타일 ===== */
+
+:root {
+  --bg: #f5f3ee;
+  --bg-soft: #ffffff;
+  --fg: #201d18;
+  --fg-muted: #6b6459;
+  --accent: #d0592c;      /* 테라코타 */
+  --accent-2: #2f6f6b;    /* 딥틸 */
+  --accent-3: #c99a3c;    /* 머스타드 */
+  --card-bg: #ffffff;
+  --card-border: #e7e1d4;
+  --code-bg: #1f2430;
+  --code-fg: #e6e6e6;
+  --code-accent: #ffcb6b;
+  --code-string: #9ece6a;
+  --code-comment: #7c8291;
+  --shadow: 0 10px 30px rgba(32, 29, 24, 0.08);
+  --radius: 18px;
+  --font-main: "Pretendard Variable", Pretendard, -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #16181d;
+    --bg-soft: #1c1f26;
+    --fg: #ecebe6;
+    --fg-muted: #a4a49c;
+    --accent: #ff8a5c;
+    --accent-2: #5fd0c9;
+    --accent-3: #ecc568;
+    --card-bg: #21242c;
+    --card-border: #32363f;
+    --code-bg: #10131a;
+    --code-fg: #e6e6e6;
+    --shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font-family: var(--font-main);
+  height: 100%;
+  overflow: hidden;
+}
+
+body.scrollable {
+  overflow: auto;
+}
+
+/* ===== 덱 레이아웃 ===== */
+.deck {
+  position: relative;
+  width: 100vw;
+  height: 100vh;
+  overflow: hidden;
+}
+
+.slide {
+  position: absolute;
+  inset: 0;
+  display: none;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 5vh 7vw 9vh;
+  opacity: 0;
+  transform: translateX(24px);
+  transition: opacity .35s ease, transform .35s ease;
+}
+
+.slide.active {
+  display: flex;
+  opacity: 1;
+  transform: translateX(0);
+}
+
+.slide-inner {
+  width: 100%;
+  max-width: 1100px;
+  max-height: 100%;
+  overflow-y: auto;
+  padding-right: 4px;
+}
+
+.slide-inner::-webkit-scrollbar { width: 6px; }
+.slide-inner::-webkit-scrollbar-thumb { background: var(--card-border); border-radius: 3px; }
+
+.slide-kicker {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: .8rem;
+  font-weight: 700;
+  letter-spacing: .08em;
+  color: var(--accent);
+  text-transform: uppercase;
+  margin-bottom: 14px;
+}
+
+.slide h1 {
+  font-size: clamp(1.8rem, 4vw, 2.7rem);
+  line-height: 1.25;
+  margin: 0 0 .5em;
+  letter-spacing: -0.01em;
+}
+
+.slide h2 {
+  font-size: clamp(1.3rem, 2.6vw, 1.8rem);
+  margin: 0 0 .7em;
+  letter-spacing: -0.01em;
+}
+
+.slide h3 {
+  font-size: 1.1rem;
+  margin: 1.1em 0 .5em;
+  color: var(--accent-2);
+}
+
+.slide p, .slide li { font-size: 1.05rem; line-height: 1.65; color: var(--fg); }
+.slide p { margin: .5em 0; }
+.muted { color: var(--fg-muted); }
+
+/* ===== 타이틀 슬라이드 ===== */
+.title-slide { justify-content: center; align-items: center; text-align: center; }
+.title-slide .deck-title { font-size: clamp(2.1rem, 5vw, 3.4rem); font-weight: 800; margin-bottom: .3em; }
+.title-slide .deck-sub { font-size: 1.15rem; color: var(--fg-muted); margin-bottom: 1.6em; }
+.title-badges { display: flex; gap: 10px; flex-wrap: wrap; justify-content: center; margin-top: 1.2em; }
+
+.badge {
+  display: inline-block;
+  padding: 6px 14px;
+  border-radius: 999px;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  font-size: .85rem;
+  color: var(--fg-muted);
+}
+
+/* ===== 카드 / 비유 박스 ===== */
+.analogy {
+  background: linear-gradient(135deg, color-mix(in srgb, var(--accent-2) 12%, var(--card-bg)), var(--card-bg));
+  border: 1px solid var(--card-border);
+  border-left: 5px solid var(--accent-2);
+  border-radius: var(--radius);
+  padding: 1.1em 1.4em;
+  margin: 1em 0;
+  box-shadow: var(--shadow);
+}
+.analogy .analogy-label {
+  font-weight: 700;
+  color: var(--accent-2);
+  font-size: .95rem;
+  margin-bottom: .3em;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.card {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 1.2em 1.4em;
+  box-shadow: var(--shadow);
+}
+
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 1.1em; width: 100%; }
+.grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1em; width: 100%; }
+
+@media (max-width: 760px) {
+  .grid2, .grid3 { grid-template-columns: 1fr; }
+}
+
+.step-list { display: flex; flex-direction: column; gap: .6em; width: 100%; }
+.step {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: 14px;
+  padding: .85em 1.1em;
+}
+.step .step-num {
+  flex: none;
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: white;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 700; font-size: .9rem;
+}
+.step .step-body { flex: 1; }
+.step .step-body b { color: var(--accent); }
+
+/* ===== 코드 블록 ===== */
+pre.code {
+  background: var(--code-bg);
+  color: var(--code-fg);
+  border-radius: 14px;
+  padding: 1em 1.2em;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: .88rem;
+  line-height: 1.55;
+  box-shadow: var(--shadow);
+  width: 100%;
+  margin: .8em 0;
+}
+pre.code .c { color: var(--code-comment); font-style: italic; }
+pre.code .k { color: #c792ea; }
+pre.code .s { color: var(--code-string); }
+pre.code .n { color: var(--code-accent); }
+pre.code .f { color: #82aaff; }
+.code-cap { font-size: .8rem; color: var(--fg-muted); margin-top: -.5em; margin-bottom: .8em; }
+
+code.inline {
+  font-family: var(--font-mono);
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+  padding: .1em .4em;
+  border-radius: 6px;
+  font-size: .92em;
+}
+
+/* ===== 비교 테이블 ===== */
+table.compare {
+  width: 100%;
+  border-collapse: collapse;
+  background: var(--card-bg);
+  border-radius: var(--radius);
+  overflow: hidden;
+  box-shadow: var(--shadow);
+  font-size: .96rem;
+}
+table.compare th, table.compare td {
+  padding: .7em 1em;
+  border-bottom: 1px solid var(--card-border);
+  text-align: left;
+}
+table.compare th {
+  background: color-mix(in srgb, var(--accent) 10%, var(--card-bg));
+  color: var(--accent);
+  font-size: .85rem;
+  text-transform: uppercase;
+  letter-spacing: .04em;
+}
+table.compare tr:last-child td { border-bottom: none; }
+
+/* ===== 퀴즈 ===== */
+.quiz {
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-radius: var(--radius);
+  padding: 1.3em 1.5em;
+  box-shadow: var(--shadow);
+  width: 100%;
+}
+.quiz .q-tag { font-size: .8rem; font-weight: 700; color: var(--accent-3); letter-spacing: .06em; }
+.quiz-options { display: flex; flex-direction: column; gap: .5em; margin-top: .8em; }
+.quiz-opt {
+  text-align: left;
+  padding: .7em 1em;
+  border-radius: 12px;
+  border: 1px solid var(--card-border);
+  background: var(--bg-soft);
+  cursor: pointer;
+  font-size: 1rem;
+  color: var(--fg);
+  font-family: var(--font-main);
+  transition: border-color .15s ease, background .15s ease;
+}
+.quiz-opt:hover { border-color: var(--accent-2); }
+.quiz-opt.correct { background: color-mix(in srgb, #4caf50 22%, var(--bg-soft)); border-color: #4caf50; }
+.quiz-opt.wrong { background: color-mix(in srgb, #e05353 20%, var(--bg-soft)); border-color: #e05353; }
+.quiz-explain {
+  margin-top: .9em;
+  padding-top: .8em;
+  border-top: 1px dashed var(--card-border);
+  font-size: .95rem;
+  color: var(--fg-muted);
+  display: none;
+}
+.quiz-explain.show { display: block; }
+
+/* ===== 목록 강조 ===== */
+.slide ul, .slide ol { padding-left: 1.3em; }
+.slide li { margin: .35em 0; }
+.hi { color: var(--accent); font-weight: 700; }
+.hi2 { color: var(--accent-2); font-weight: 700; }
+
+.center { text-align: center; }
+.small { font-size: .9rem; }
+
+/* ===== 하단 네비게이션 ===== */
+.nav-bar {
+  position: fixed;
+  left: 0; right: 0; bottom: 0;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 24px;
+  background: linear-gradient(0deg, var(--bg) 60%, transparent);
+  z-index: 20;
+}
+.nav-left, .nav-right { display: flex; align-items: center; gap: 10px; }
+.nav-btn {
+  border: 1px solid var(--card-border);
+  background: var(--card-bg);
+  color: var(--fg);
+  border-radius: 999px;
+  padding: .45em 1em;
+  font-size: .9rem;
+  cursor: pointer;
+  font-family: var(--font-main);
+  box-shadow: var(--shadow);
+}
+.nav-btn:disabled { opacity: .35; cursor: default; }
+.nav-btn:not(:disabled):hover { border-color: var(--accent); color: var(--accent); }
+.home-btn { text-decoration: none; }
+.slide-counter { font-size: .85rem; color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+
+.progress-track {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  background: var(--card-border);
+  z-index: 21;
+}
+.progress-bar {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent), var(--accent-3));
+  width: 0%;
+  transition: width .3s ease;
+}
+
+kbd {
+  font-family: var(--font-mono);
+  background: var(--card-bg);
+  border: 1px solid var(--card-border);
+  border-bottom-width: 2px;
+  border-radius: 5px;
+  padding: 0 .4em;
+  font-size: .85em;
+}
+
+.emoji { font-size: 1.3em; }
+
+/* section divider slide */
+.section-slide {
+  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-2) 100%);
+  color: white;
+}
+.section-slide h1, .section-slide p { color: white; }
+.section-slide .slide-kicker { color: rgba(255,255,255,.85); }

@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>1장. 토크나이저 (기본편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch01">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 1</div>
+      <div class="deck-title">토크나이저 (기본편)</div>
+      <div class="deck-sub">글자를 숫자로, 숫자를 다시 글자로 — 컴퓨터와 언어를 잇는 통역사 만들기</div>
+      <div class="title-badges">
+        <span class="badge">🔤 문자 단위</span>
+        <span class="badge">🧱 바이트 단위</span>
+        <span class="badge">🔗 BPE</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">문자 단위 · 바이트 단위 토큰화의 장단점</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">BPE(Byte Pair Encoding) 학습 알고리즘</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">BPE 인코딩·디코딩, 특수 토큰, 사전 토큰화</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">TinyCodes 데이터로 실제 토크나이저 학습·평가</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">왜 토큰화가 필요한가</div>
+      <h1>컴퓨터는 숫자만 이해한다</h1>
+      <div class="analogy">
+        <div class="analogy-label">✈️ 비유</div>
+        <p>외국에 가면 통역사가 내 말을 그 나라 언어로, 그 나라 말을 다시 내 말로 바꿔주죠.
+        <b>토크나이저</b>도 똑같습니다. "안녕"이라는 글자를 모델이 계산할 수 있는
+        <span class="hi2">토큰 ID(숫자)</span>로 바꾸고(인코딩), 모델이 내놓은 숫자를 다시 사람이 읽을 글자로
+        바꿔줍니다(디코딩).</p>
+      </div>
+      <p class="muted">이 장에서는 이 통역사를 <b>문자 단위 → 바이트 단위 → BPE</b> 순서로 점점 똑똑하게 발전시킵니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.1 문자 단위 토큰화</div>
+      <h1>가장 단순한 방법: 글자 하나 = 번호 하나</h1>
+      <p>파이썬의 <code class="inline">ord()</code>/<code class="inline">chr()</code>를 쓰면 글자마다 이미
+      정해진 유니코드 번호가 있습니다.</p>
+      <pre class="code"><span class="k">class</span> <span class="f">CharTokenizer</span>:
+    <span class="k">def</span> <span class="f">encode</span>(self, text):
+        <span class="k">return</span> [ord(c) <span class="k">for</span> c <span class="k">in</span> text]
+
+    <span class="k">def</span> <span class="f">decode</span>(self, ids):
+        <span class="k">return</span> ''.join([chr(i) <span class="k">for</span> i <span class="k">in</span> ids])
+
+<span class="c"># "hello월드😁" → [104, 101, 108, 108, 111, 50900, 46300, 128513]</span></pre>
+      <div class="analogy">
+        <div class="analogy-label">📕 비유</div>
+        <p>세상의 <b>모든 글자마다 고유 번호가 이미 매겨진 초대형 사전</b>을 그대로 쓰는 셈입니다.
+        문제는 이 사전이 이모지까지 포함해 <b>10만 개가 훌쩍 넘는다</b>는 것 — 모델이 다뤄야 할
+        "단어장"이 지나치게 커집니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.2 바이트 단위 토큰화</div>
+      <h1>기본 단위를 256개로 확 줄이기</h1>
+      <p>UTF-8로 인코딩하면 어떤 문자든 <b>0~255 사이의 바이트 값들의 조합</b>으로 표현됩니다.</p>
+      <pre class="code"><span class="k">class</span> <span class="f">ByteTokenizer</span>:
+    <span class="k">def</span> <span class="f">encode</span>(self, text):
+        <span class="k">return</span> list(text.encode(<span class="s">"utf-8"</span>))
+
+    <span class="k">def</span> <span class="f">decode</span>(self, ids):
+        <span class="k">return</span> bytes(ids).decode(<span class="s">"utf-8"</span>)
+
+<span class="c"># '가' → b'\xea\xb0\x80' → [234, 160, 128]  (한 글자가 바이트 3개로!)</span></pre>
+      <div class="analogy">
+        <div class="analogy-label">🧱 비유</div>
+        <p><b>레고 기본 블록 256종류</b>만으로 세상 모든 것을 조립하는 것과 같습니다. 사전 크기는
+        딱 256개로 고정되어 깔끔하지만, 영어가 아닌 글자(한글, 이모지 등)는
+        <span class="hi">여러 블록을 이어 붙여야</span> 해서 문장이 훨씬 길어집니다.</p>
+      </div>
+      <table class="compare" style="margin-top:1em;">
+        <tr><th>방식</th><th>어휘 크기</th><th>한글 한 글자</th></tr>
+        <tr><td>문자 단위</td><td>10만+ (사실상 무한)</td><td>토큰 1개</td></tr>
+        <tr><td>바이트 단위</td><td>256 (고정)</td><td>토큰 3개</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.3 BPE 학습 알고리즘</div>
+      <h1>자주 붙어다니는 짝을 새 토큰으로 승격</h1>
+      <div class="analogy">
+        <div class="analogy-label">💬 비유</div>
+        <p>메신저에서 "ㅇㅋ", "생축"처럼 <b>자주 쓰는 표현을 줄임말로 새로 만드는 것</b>과 같습니다.
+        BPE(Byte Pair Encoding)는 텍스트 안에서 <span class="hi">가장 자주 붙어 나오는 바이트 쌍</span>을
+        찾아 새로운 토큰 하나로 합치는 과정을, 원하는 어휘 크기가 될 때까지 반복합니다.</p>
+      </div>
+      <pre class="code"><span class="k">def</span> <span class="f">count_pairs</span>(ids):          <span class="c"># 인접한 쌍의 빈도 세기</span>
+    counts = defaultdict(int)
+    <span class="k">for</span> pair <span class="k">in</span> zip(ids, ids[1:]):
+        counts[pair] += 1
+    <span class="k">return</span> counts
+
+<span class="k">def</span> <span class="f">merge</span>(ids, pair, new_id):    <span class="c"># 가장 빈번한 쌍을 새 ID로 교체</span>
+    <span class="c">... (i, i+1)이 pair와 같으면 new_id 하나로 합치고, 아니면 그대로 둔다</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>BPE 학습 루프</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">텍스트를 바이트 ID열(0~255)로 변환</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">가장 <b>자주 등장하는 인접 쌍</b>을 찾음 <code class="inline">max(counts, key=counts.get)</code></div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">그 쌍에 <b>새 토큰 ID(256, 257, …)</b>를 부여하고 병합 규칙에 저장</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">전체 ID열에서 그 쌍을 새 ID로 교체</div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-body"><b>목표 어휘 크기</b>에 도달할 때까지 2~4를 반복</div></div>
+      </div>
+      <pre class="code"><span class="c"># "Hello world! This is BPE training." → vocab_size=260 (병합 4번)</span>
+merge_rules = {(105, 115): 256,   <span class="c"># 'i'+'s' → 256</span>
+               (256, 32): 257,    <span class="c"># 256+' ' → 257 ("is ")</span>
+               (105, 110): 258,   <span class="c"># 'i'+'n' → 258</span>
+               (72, 101): 259}    <span class="c"># 'H'+'e' → 259</span></pre>
+      <p class="muted">병합할 때마다 어휘가 1개씩 늘고, 텍스트를 표현하는 토큰 수는 점점 줄어듭니다 — 즉 <b>압축</b>됩니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.4 BPE 인코딩과 디코딩</div>
+      <h1>학습된 규칙으로 압축하고, 다시 풀어내기</h1>
+      <p><b>인코딩</b>: 학습 때와 같은 순서로 병합 규칙을 차례로 적용합니다.<br>
+      <b>디코딩</b>: 각 토큰 ID가 어떤 바이트열이었는지 표(<code class="inline">id_to_bytes</code>)를 보고
+      이어붙인 뒤 UTF-8로 되돌립니다.</p>
+      <pre class="code"><span class="k">class</span> <span class="f">BPETokenizer</span>:
+    <span class="k">def</span> <span class="f">__init__</span>(self, merge_rules):
+        self.id_to_bytes = {i: bytes([i]) <span class="k">for</span> i <span class="k">in</span> range(256)}
+        <span class="k">for</span> (id1, id2), new_id <span class="k">in</span> merge_rules.items():
+            self.id_to_bytes[new_id] = self.id_to_bytes[id1] + self.id_to_bytes[id2]
+
+    <span class="k">def</span> <span class="f">decode</span>(self, ids):
+        combined = b<span class="s">""</span>.join(self.id_to_bytes[i] <span class="k">for</span> i <span class="k">in</span> ids)
+        <span class="k">return</span> combined.decode(<span class="s">"utf-8"</span>, errors=<span class="s">"replace"</span>)</pre>
+      <div class="analogy">
+        <div class="analogy-label">🗜️ 비유</div>
+        <p>zip 압축 프로그램과 비슷합니다. 병합 규칙표는 <b>"압축 해제 사전"</b> 역할을 해서,
+        어떤 토큰이 원래 어떤 바이트 조각들이었는지 보고 원문을 정확히 복원합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.5 특수 토큰 대응</div>
+      <h1>"여기서 끝!"을 알려주는 도장</h1>
+      <div class="analogy">
+        <div class="analogy-label">📄 비유</div>
+        <p>여러 문서를 이어 붙여 학습할 때, 문서와 문서 사이에 <b>"끝" 도장</b>을 찍어두지 않으면
+        모델이 서로 다른 글을 하나로 착각합니다. <code class="inline">&lt;|endoftext|&gt;</code>라는
+        <span class="hi2">특수 토큰</span>이 그 도장 역할을 합니다.</p>
+      </div>
+      <ul>
+        <li>학습 전, 원문을 <code class="inline">&lt;|endoftext|&gt;</code> 기준으로 먼저 나눈 뒤 각 조각 안에서만 BPE 병합 진행 (문서 경계를 넘어서 병합되지 않도록)</li>
+        <li>특수 토큰에는 <b>전용 ID</b> 하나를 별도로 배정 (병합 규칙과 무관하게 통째로 취급)</li>
+        <li>인코딩 시 정규식으로 특수 토큰을 먼저 분리한 뒤, 나머지 부분만 BPE 인코딩</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.6 사전 토큰화</div>
+      <h1>자르기 전에 재료부터 미리 손질하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🍱 비유</div>
+        <p>김밥을 말기 전에 재료를 미리 알맞은 크기로 손질해두듯, BPE를 돌리기 전에
+        <b>정규식으로 먼저 단어·공백·숫자·문장부호 단위로 큼직하게 잘라둡니다</b>(사전 토큰화).
+        그래야 <code class="inline">"dog."</code>와 <code class="inline">"dog!"</code>처럼 의미상 무관한
+        조합이 하나의 토큰으로 이상하게 뭉치는 것을 막을 수 있습니다.</p>
+      </div>
+      <pre class="code"><span class="k">import</span> regex <span class="k">as</span> re
+pattern = <span class="s">r"'(?:[sdmt]|ll|ve|re)| ?\p{L}+| ?\p{N}+| ?[^\s\p{L}\p{N}]+|\s+(?!\S)|\s+"</span>
+<span class="k">def</span> <span class="f">pretokenize</span>(text):
+    <span class="k">return</span> re.findall(pattern, text)  <span class="c"># GPT-2와 동일한 패턴</span></pre>
+      <p class="muted">이후 BPE는 이렇게 나뉜 <b>조각(pretoken) 안에서만</b> 병합을 수행합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.7 TinyCodes를 이용한 학습</div>
+      <h1>실전: CodeBot의 토크나이저 학습하기</h1>
+      <pre class="code"><span class="k">from</span> codebot.tokenizer <span class="k">import</span> train_bpe
+
+vocab_size = 1000
+text = open(<span class="s">"codebot/tiny_codes.txt"</span>).read()
+merge_rules = train_bpe(text, vocab_size)
+
+pickle.dump(merge_rules, open(<span class="s">"codebot/merge_rules.pkl"</span>, <span class="s">"wb"</span>))</pre>
+      <div class="analogy">
+        <div class="analogy-label">🏃 직접 실행해보기</div>
+        <p><code class="inline">python ch01/07_tiny_codes.py</code> — 코드 데이터셋(TinyCodes)으로
+        256개 기본 바이트에서 시작해 1,000개 어휘가 될 때까지 병합 규칙을 학습하고 파일로 저장합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.8 토크나이저 평가</div>
+      <h1>얼마나 잘 "압축"했을까?</h1>
+      <p>토크나이저의 품질은 <b>압축률</b>(원문 바이트 수 ÷ 토큰 수)로 가늠할 수 있습니다.</p>
+      <pre class="code">byte_count = len(text.encode(<span class="s">"utf-8"</span>))
+ids_count  = len(tokenizer.encode(text))
+compression_ratio = byte_count / ids_count
+<span class="c"># 예: 압축률 3.5배 → 평균 1토큰이 3.5바이트를 담당</span></pre>
+      <div class="analogy">
+        <div class="analogy-label">📦 비유</div>
+        <p>압축 프로그램의 압축률과 똑같은 개념입니다. 압축률이 높을수록 <b>같은 문장을 더 적은
+        토큰으로</b> 표현할 수 있어, 모델이 한 번에 더 많은 내용을 "시야"에 담고 학습·추론 속도도 빨라집니다.</p>
+      </div>
+      <p class="muted">학습 초반에 만들어진 토큰(ID 256~)은 짧은 흔한 조합, 후반에 만들어진 토큰(ID 990~)은
+      코드에서 자주 쓰이는 긴 패턴(예: 함수 정의 구문)인 경향이 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.9 TinyCodes 인코딩</div>
+      <h1>학습용 데이터를 통째로 숫자로 바꿔두기</h1>
+      <pre class="code">tokenizer = BPETokenizer.load_from(<span class="s">"codebot/merge_rules.pkl"</span>)
+ids = tokenizer.encode(text, show_progress=True)
+
+ids_array = np.array(ids, dtype=np.uint16)   <span class="c"># 어휘 1,000개 → 2바이트로 충분</span>
+ids_array.tofile(<span class="s">"codebot/tiny_codes.bin"</span>)</pre>
+      <p>전체 TinyCodes 텍스트를 한 번에 토큰 ID 배열로 바꿔 <code class="inline">.bin</code> 파일로
+      저장해두면, 3장의 사전 학습 때마다 매번 다시 인코딩할 필요 없이 바로 불러 쓸 수 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">1.10 정리</div>
+      <h1>1장 핵심 요약</h1>
+      <ul>
+        <li><b>문자 단위</b>: 직관적이지만 어휘가 10만+ 로 지나치게 큼</li>
+        <li><b>바이트 단위</b>: 어휘 256개로 고정되지만 비영어권 텍스트가 길어짐</li>
+        <li><b>BPE</b>: 자주 붙어 나오는 쌍을 반복적으로 병합해, <span class="hi">어휘 크기와 압축률 사이의 균형</span>을 스스로 찾아냄</li>
+        <li><b>특수 토큰</b>으로 문서 경계를 표시하고, <b>사전 토큰화</b>로 엉뚱한 병합을 방지</li>
+        <li>이렇게 만든 토크나이저로 TinyCodes 전체를 인코딩해 다음 장(모델)의 재료를 준비</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">➡️ 다음 시간</div>
+        <p>2장 <b>모델</b>: 토큰 ID들을 받아 "다음 토큰"을 예측하는 어텐션과 트랜스포머 구조를 만듭니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">바이트 단위 토큰화의 어휘 크기는 항상 몇 개인가요?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">언어마다 다르다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">256개로 고정된다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">10만 개 이상이다</button>
+        </div>
+        <div class="quiz-explain">정답: 256개. UTF-8로 인코딩한 바이트 값은 항상 0~255 범위이므로 어휘 크기가 고정됩니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">BPE 학습에서 매 단계마다 병합하는 대상은?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">무작위로 고른 인접 쌍</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">가장 드물게 등장하는 인접 쌍</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">가장 자주 등장하는 인접 쌍</button>
+        </div>
+        <div class="quiz-explain">정답: 가장 자주 등장하는 인접 쌍. 이를 새 토큰 ID로 승격시키는 과정을 목표 어휘 크기까지 반복합니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch00.html">← 0장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch02.html">2장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>5장. 모델 (응용편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch05">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 5 · PART II</div>
+      <div class="deck-title">모델 (응용편)</div>
+      <div class="deck-sub">RoPE · SwiGLU · RMSNorm · KV 캐시 — StoryBot의 업그레이드된 두뇌</div>
+      <div class="title-badges">
+        <span class="badge">🧭 RoPE</span>
+        <span class="badge">🚿 SwiGLU</span>
+        <span class="badge">⚡ KV 캐시</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <p class="muted">2장의 GPT-2는 잘 작동하지만, 최신 LLM들은 몇 가지 부품을 더 효율적인 것으로 교체합니다.
+      이번 장은 그 교체 부품 4가지를 하나씩 살펴봅니다.</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">RoPE — 위치 정보를 벡터 회전으로 표현</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">SwiGLU — 게이트가 달린 FFN</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">RMSNorm — 더 가벼워진 정규화</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">KV 캐시 — 생성 속도를 끌어올리는 메모</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">5.1 RoPE (회전 위치 인코딩)</div>
+      <h1>위치를, 벡터를 "돌려서" 표현하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧭 비유 — 시계 바늘</div>
+        <p>2장의 위치 인코딩은 단어 벡터에 위치 정보를 <b>더하는</b> 방식이었습니다. RoPE는 대신 Q, K
+        벡터를 <b>위치에 비례하는 각도만큼 회전</b>시킵니다. 시계 바늘이 시간이 지날수록 일정한 각도로
+        계속 돌아가듯, 토큰이 뒤로 갈수록 벡터도 조금씩 더 돌아갑니다. 두 벡터의 <span class="hi2">
+        회전 각도 차이가 곧 "둘 사이의 거리"</span>가 되어, 상대적 위치 관계가 자연스럽게 계산에 녹아듭니다.</p>
+      </div>
+      <pre class="code">angle = position * inv_freq          <span class="c"># 위치에 비례한 회전 각도</span>
+q_rot = q * cos(angle) - q_swap * sin(angle)  <span class="c"># Q, K를 회전</span>
+<span class="c"># 회전된 Q·K를 내적하면 "위치 차이"가 자동으로 반영됨</span></pre>
+      <p class="muted">덧셈(절대 위치) 대신 회전(상대 위치)을 쓰면, 학습 때보다 더 긴 문장에도
+      비교적 잘 대응합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">5.2 SwiGLU</div>
+      <h1>수도꼭지 두 개로 흐름을 정교하게 조절하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🚿 비유</div>
+        <p>2장의 FFN은 하나의 통로로 정보를 흘려보냈습니다. SwiGLU는 <b>두 개의 변환</b>을 만들어
+        하나(<code class="inline">V</code>)는 "내용물", 다른 하나(<code class="inline">W</code>, SiLU
+        활성화 통과)는 <span class="hi">"얼마나 흘려보낼지 정하는 밸브(게이트)"</span> 역할을 하게
+        해서 둘을 곱합니다. 밸브가 있는 수도꼭지가 물의 양을 더 섬세하게 조절할 수 있는 것과 같습니다.</p>
+      </div>
+      <pre class="code">a = W(x)              <span class="c"># 밸브: 얼마나 통과시킬지</span>
+b = V(x)              <span class="c"># 내용물</span>
+gated = silu(a) * b   <span class="c"># 밸브를 통과한 만큼만 내용물이 흐름</span>
+out = O(gated)</pre>
+      <p class="muted">같은 파라미터 예산에서 성능이 더 좋다고 알려져, LLaMA 등 최신 모델 다수가 채택했습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">5.3 RMSNorm</div>
+      <h1>레시피에서 불필요한 단계 하나 생략하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">✂️ 비유</div>
+        <p>2장의 LayerNorm은 <b>평균을 빼고(중심 맞추기) → 표준편차로 나누고(크기 맞추기)</b> 두
+        단계를 거칩니다. RMSNorm은 평균을 빼는 단계를 생략하고 <span class="hi2">크기(제곱평균제곱근)
+        로만 나눠</span> 스케일을 맞춥니다. 딱 필요한 만큼만 정규화해 계산이 더 가볍고, 실전에서도
+        성능 차이는 크지 않습니다.</p>
+      </div>
+      <pre class="code"><span class="c">// LayerNorm: (x - 평균) / 표준편차</span>
+<span class="c">// RMSNorm:    x / RMS(x)              ← 평균을 빼는 단계가 없음</span>
+rms = sqrt(mean(x**2) + eps)
+out = gamma * x / rms</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">5.4 개선된 GPT 구현</div>
+      <h1>세 부품을 조립해 StoryBot의 몸통을 완성</h1>
+      <pre class="code"><span class="k">class</span> <span class="f">Block</span>(nn.Module):
+    <span class="k">def</span> <span class="f">__init__</span>(self, embed_dim, n_head, ff_dim, rope):
+        self.norm1 = nn.RMSNorm(embed_dim)              <span class="c"># ← RMSNorm</span>
+        self.attn  = MultiHeadAttention(..., rope=rope)  <span class="c"># ← RoPE 내장</span>
+        self.norm2 = nn.RMSNorm(embed_dim)
+        self.ffn   = SwiGLU(embed_dim, ff_dim)            <span class="c"># ← SwiGLU</span>
+
+    <span class="k">def</span> <span class="f">forward</span>(self, x):
+        x = x + self.attn(self.norm1(x))
+        x = x + self.ffn(self.norm2(x))
+        <span class="k">return</span> x</pre>
+      <p class="muted">2장의 GPT-2와 뼈대(잔차 연결 + 정규화 + 어텐션 + FFN)는 완전히 동일하고,
+      <b>내부 부품만 더 효율적인 것으로 교체</b>했다는 점이 핵심입니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">5.5 KV 캐시</div>
+      <h1>매번 처음부터 다시 확인하지 않는 웨이터</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧑‍🍳 비유</div>
+        <p>토큰을 한 개씩 생성할 때마다 <b>지금까지의 모든 토큰</b>을 처음부터 다시 어텐션 계산하면
+        매우 비효율적입니다. KV 캐시는 이미 계산해 둔 과거 토큰들의 <span class="hi">Key와 Value를
+        메모해두고</span>, 새로 생긴 토큰의 K·V만 추가로 계산해 이어 붙입니다 — 손님이 추가 주문을
+        할 때마다 이전 주문 전체를 다시 묻지 않고, 메모장에 새 주문만 한 줄 추가하는 웨이터와 같습니다.</p>
+      </div>
+      <pre class="code"><span class="k">if</span> is_first_call:
+    k_cache, v_cache = K, V                          <span class="c"># 프리필: 캐시 생성</span>
+<span class="k">else</span>:
+    k_cache = torch.cat([k_cache, K], dim=2)          <span class="c"># 디코드: 새 토큰만 추가</span>
+    v_cache = torch.cat([v_cache, V], dim=2)</pre>
+      <table class="compare" style="margin-top:1em;">
+        <tr><th></th><th>캐시 없음</th><th>KV 캐시 사용</th></tr>
+        <tr><td>매 스텝 계산량</td><td>전체 토큰 재계산</td><td>새 토큰 1개만 계산</td></tr>
+        <tr><td>200토큰 생성 속도</td><td>느림</td><td>수 배 빠름</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">5.6 정리</div>
+      <h1>5장 핵심 요약</h1>
+      <ul>
+        <li><b>RoPE</b>: 위치 정보를 벡터 "회전"으로 표현 → 상대적 거리 관계를 자연스럽게 반영</li>
+        <li><b>SwiGLU</b>: 게이트가 달린 FFN → 정보 흐름을 더 정교하게 조절</li>
+        <li><b>RMSNorm</b>: 평균 빼기를 생략한 가벼운 정규화</li>
+        <li><b>KV 캐시</b>: 과거 토큰의 Key·Value를 재사용해 생성 속도를 크게 향상</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">➡️ 다음 시간</div>
+        <p>6장 <b>학습(응용편)</b>: AdamW, 학습률 스케줄, 혼합 정밀도, DPO로 StoryBot을 실제로 훈련합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">RoPE가 위치 정보를 표현하는 방식은?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">위치 임베딩 벡터를 토큰 벡터에 더한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">Q, K 벡터를 위치에 비례한 각도만큼 회전시킨다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">토큰 순서를 무작위로 섞는다</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 덧셈이 아니라 회전으로 위치를 표현해 상대적 거리 정보를 자연스럽게 담습니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">KV 캐시를 사용하면 새 토큰을 생성할 때 다시 계산해야 하는 것은?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">지금까지의 모든 토큰의 K, V</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">새로 추가된 토큰 하나의 K, V</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">모델의 전체 파라미터</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 과거 토큰의 K, V는 캐시에 저장해 재사용하고, 새 토큰의 K, V만 계산해서 캐시에 이어 붙입니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch04.html">← 4장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch06.html">6장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

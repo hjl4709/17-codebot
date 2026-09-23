@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>2장. 모델 (기본편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch02">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 2</div>
+      <div class="deck-title">모델 (기본편)</div>
+      <div class="deck-sub">토큰들을 보고 "다음 토큰"을 추측하는 두뇌, 트랜스포머 뜯어보기</div>
+      <div class="title-badges">
+        <span class="badge">🔍 어텐션</span>
+        <span class="badge">🧑‍🤝‍🧑 멀티헤드</span>
+        <span class="badge">🏗️ GPT-2</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">어텐션의 원리 — "소프트 딕셔너리"</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">Q, K, V와 스케일링, 어텐션 마스크</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">멀티헤드 어텐션과 트랜스포머 블록</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">이 모든 블록을 쌓은 GPT-2 구조</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.1 어텐션 기본 원리</div>
+      <h1>어텐션은 "흐릿한(soft) 딕셔너리"다</h1>
+      <div class="analogy">
+        <div class="analogy-label">🎬 비유 — 영화 추천</div>
+        <p>보통 딕셔너리는 키가 정확히 일치해야 값을 찾습니다. 하지만 영화 취향은 딱 떨어지지 않죠.
+        <b>"액션 6, 드라마 4, 코미디 5"인 새 영화</b>를 평가하고 싶다면, 기존 영화들 중 <span class="hi2">
+        취향이 비슷한 영화일수록 더 큰 비중</span>을 두고 그 평점들을 섞어서 예측하면 됩니다.
+        이것이 바로 어텐션의 핵심 아이디어입니다.</p>
+      </div>
+      <pre class="code"><span class="k">def</span> <span class="f">soft_dictionary</span>(query, dictionary):
+    similarity = [dot(query, key) <span class="k">for</span> key <span class="k">in</span> dictionary]   <span class="c"># 유사도</span>
+    weights = softmax(similarity)                            <span class="c"># 비율로 정규화</span>
+    <span class="k">return</span> sum(w * v <span class="k">for</span> w, v <span class="k">in</span> zip(weights, dictionary.values()))</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.2 어텐션의 수식과 구현</div>
+      <h1>Query, Key, Value — 세 가지 역할</h1>
+      <div class="analogy">
+        <div class="analogy-label">📚 비유 — 도서관 사서</div>
+        <p><b>Query(질문)</b>: 내가 사서에게 하는 질문 ("SF 로맨스 소설 찾아줘").<br>
+        <b>Key(색인)</b>: 책마다 붙어있는 요약 키워드 카드.<br>
+        <b>Value(내용)</b>: 그 책이 실제로 담고 있는 내용.<br>
+        질문과 색인이 비슷할수록 그 책의 내용을 더 많이 참고합니다.</p>
+      </div>
+      <pre class="code"><span class="k">def</span> <span class="f">attention</span>(Q, K, V):
+    similarity = Q @ K.T                    <span class="c"># 질문·색인 유사도</span>
+    weights = softmax(similarity, dim=1)    <span class="c"># 비율로 정규화</span>
+    output = weights @ V                    <span class="c"># 내용을 가중합</span>
+    <span class="k">return</span> output</pre>
+      <p class="muted">실제 모델에서는 Q, K, V 모두 입력 <code class="inline">x</code>에 각각 다른 학습된
+      변환 행렬(<code class="inline">W_q, W_k, W_v</code>)을 곱해 만들어냅니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.3 어텐션 스케일링</div>
+      <h1>왜 √d로 나눌까?</h1>
+      <p>차원 수(d)가 커지면 Q·K의 내적 값도 커지고 <b>분산이 커집니다</b>. 그러면 softmax가 한쪽으로
+      극단적으로 쏠려버립니다.</p>
+      <pre class="code">softmax([100, 200, 300]) ≈ [0, 0, <span class="hi">1</span>]   <span class="c"># 사실상 한 곳만 선택 (원-핫)</span>
+scores = (Q @ K.T) / sqrt(d)  <span class="c"># 분산을 일정하게 유지</span></pre>
+      <div class="analogy">
+        <div class="analogy-label">🎤 비유 — 마이크 볼륨</div>
+        <p>여러 사람이 동시에 말할 때 한 사람만 마이크를 세게 잡으면 그 목소리만 들리고 나머지는
+        묻혀버립니다. <b>√d로 나누는 것은 모든 목소리 크기를 적당히 조절</b>해, 여러 단어의 정보를
+        골고루 반영할 수 있게 하는 볼륨 조절 장치입니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.4 – 2.5 트랜스포머 구조 & 위치 인코딩</div>
+      <h1>순서를 모르는 모델에게 순서를 알려주기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🗂️ 비유</div>
+        <p>어텐션 계산만 보면 트랜스포머는 단어들을 <b>뒤섞인 카드 더미</b>처럼 다룹니다 — "누가 몇 번째인지"
+        신경 쓰지 않습니다. 그래서 <span class="hi2">위치 인코딩(position embedding)</span>이라는
+        순서 스티커(1번, 2번, 3번…)를 각 단어 임베딩에 더해줘야 순서 정보를 알 수 있습니다.</p>
+      </div>
+      <pre class="code">emb     = self.embed(ids)               <span class="c"># 토큰 자체의 의미</span>
+pos_emb = self.pos_embed(positions)     <span class="c"># 몇 번째 위치인지</span>
+x = emb + pos_emb                       <span class="c"># 두 정보를 더해 입력으로 사용</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.6 어텐션 마스크</div>
+      <h1>미래를 훔쳐보지 못하게 가리기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📝 비유 — 시험 답안지 가리개</div>
+        <p>다음 단어를 맞히는 연습을 하는데 이미 정답(미래 단어)을 볼 수 있다면 반칙이겠죠?
+        <b>인과적 마스크(causal mask)</b>는 각 위치가 <span class="hi">자기 자신과 그 이전 토큰만</span>
+        보게 하고, 뒤쪽은 확률 0(−∞)으로 가려버립니다.</p>
+      </div>
+      <pre class="code">mask = torch.tril(torch.ones(C, C))                 <span class="c"># 하삼각행렬: 과거만 1</span>
+scores = scores.masked_fill(mask == 0, float(<span class="s">'-inf'</span>))
+weights = softmax(scores, dim=-1)                   <span class="c"># 미래 위치 가중치는 0이 됨</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.7 밸류 변환 행렬 효율 개선</div>
+      <h1>짐을 압축해서 옮기고, 도착해서 다시 풀기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧳 비유</div>
+        <p>Value를 처음부터 큰 차원(embed_dim)으로 만들면 계산이 무겁습니다. 대신 <b>작은 캐리어
+        (key_dim)에 압축</b>해서 어텐션 연산을 마친 뒤, 도착지에서 <code class="inline">W_o</code>로
+        다시 원래 크기로 풀어놓으면 <span class="hi2">파라미터 수를 크게 줄일 수 있습니다</span>.</p>
+      </div>
+      <pre class="code">V = self.W_v(x)                 <span class="c"># embed_dim → key_dim (압축)</span>
+hidden = weights @ V            <span class="c"># 어텐션 계산은 key_dim에서</span>
+output = self.W_o(hidden)       <span class="c"># key_dim → embed_dim (다시 복원)</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.8 멀티헤드 어텐션</div>
+      <h1>여러 전문가가 동시에 회의하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧑‍🤝‍🧑 비유 — 전문가 회의</div>
+        <p>문장 하나를 분석할 때 <b>문법 전문가, 의미 전문가, 감정 전문가</b>가 동시에 각자의 관점으로
+        살펴본 뒤 의견을 모으면 더 풍부한 이해가 가능합니다. 멀티헤드 어텐션은 Q·K·V를
+        <span class="hi">여러 개의 작은 "헤드"로 나눠</span> 각기 다른 관점의 어텐션을 병렬로 계산하고,
+        마지막에 그 결과를 이어붙여 다시 합칩니다.</p>
+      </div>
+      <pre class="code">Q = Q.view(B, C, H, D).transpose(1, 2)  <span class="c"># (B, H, C, D) — H개의 헤드로 분할</span>
+<span class="c">... 각 헤드마다 독립적으로 어텐션 계산 ...</span>
+hidden = hidden.transpose(1, 2).view(B, C, H*D)  <span class="c"># 다시 하나로 합침</span>
+output = self.W_o(hidden)</pre>
+      <p class="muted">n_head=8, head_dim=64라면 embed_dim=512인 셈입니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.9 트랜스포머 블록</div>
+      <h1>컨베이어 벨트 + 회의실 + 개인 책상</h1>
+      <div class="analogy">
+        <div class="analogy-label">🏭 비유</div>
+        <p>블록은 <b>잔차 연결(residual)</b>로 원본 정보를 컨베이어 벨트처럼 계속 흘려보내면서,
+        그 위에 가공 결과를 "더해나갑니다". 어텐션은 <span class="hi2">토큰들끼리 정보를 주고받는 회의실</span>이고,
+        FFN(피드포워드)은 <span class="hi2">각 토큰이 혼자 책상에 앉아 생각을 정리하는 단계</span>입니다.</p>
+      </div>
+      <pre class="code">x = x + self.attn(self.norm1(x))   <span class="c"># 회의: 토큰끼리 정보 교환 + 원본 유지</span>
+x = x + self.ffn(self.norm2(x))    <span class="c"># 개인 작업: 토큰별 심화 처리 + 원본 유지</span></pre>
+      <p><b>LayerNorm</b>은 사진 보정에서 밝기·명암을 일정한 범위로 맞추듯, 값의 스케일을 매번
+      정돈해 학습을 안정시킵니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.10 GPT-2</div>
+      <h1>블록을 쌓아 완성하는 하나의 모델</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">토큰 임베딩 + 위치 임베딩 → 입력 벡터</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">트랜스포머 블록을 <code class="inline">n_layer</code>번 통과 (예: 6층)</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">최종 LayerNorm</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><code class="inline">unembed</code>로 어휘 크기만큼의 점수(logits) 산출 → 다음 토큰 확률</div></div>
+      </div>
+      <p class="muted" style="margin-top:1em;">입력 임베딩과 출력 언임베딩의 <b>가중치를 공유</b>(weight tying)해
+      파라미터를 절약합니다: <code class="inline">self.embed.weight = self.unembed.weight</code></p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>하이퍼파라미터 한눈에 보기</h1>
+      <table class="compare">
+        <tr><th>이름</th><th>의미</th><th>비유</th></tr>
+        <tr><td><code class="inline">vocab_size</code></td><td>토큰 어휘 크기</td><td>단어장 두께</td></tr>
+        <tr><td><code class="inline">embed_dim</code></td><td>토큰 벡터의 차원 수</td><td>한 단어를 표현하는 특징의 개수</td></tr>
+        <tr><td><code class="inline">n_head</code></td><td>어텐션 헤드 수</td><td>회의에 참여하는 전문가 수</td></tr>
+        <tr><td><code class="inline">n_layer</code></td><td>블록 개수</td><td>공정 단계(층) 수</td></tr>
+        <tr><td><code class="inline">ff_dim</code></td><td>FFN 은닉층 크기</td><td>개인 책상의 넓이</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">2.11 정리</div>
+      <h1>2장 핵심 요약</h1>
+      <ul>
+        <li>어텐션 = <b>유사도 기반으로 값을 가중합하는 "소프트 딕셔너리"</b></li>
+        <li>Q(질문) · K(색인) · V(내용), √d 스케일링으로 softmax 극단화 방지</li>
+        <li>인과적 마스크로 <b>미래 토큰 참조를 차단</b> → 다음 토큰 예측 과제에 적합</li>
+        <li>멀티헤드 = <b>여러 관점을 병렬로 분석</b>, 잔차 연결 + LayerNorm으로 깊게 쌓아도 안정적 학습</li>
+        <li>블록을 여러 층 쌓고 임베딩을 공유하면 <b>GPT-2</b> 구조 완성</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">➡️ 다음 시간</div>
+        <p>3장 <b>학습</b>: 이 모델을 실제로 훈련시켜 사전 학습 → SFT → 강화 학습까지 진행합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">어텐션 점수를 √d로 나누는 이유는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">계산 속도를 높이기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">내적 값의 분산을 줄여 softmax가 한쪽으로 쏠리는 것을 막기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">어휘 크기를 맞추기 위해</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 차원이 커질수록 내적 값의 분산이 커져 softmax가 원-핫에 가까워지는데, √d로 나누면 분산이 일정하게 유지됩니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">인과적 마스크(causal mask)는 무엇을 막기 위한 장치인가요?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">모델이 아직 등장하지 않은 미래 토큰을 미리 참조하는 것</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">모델이 너무 긴 문장을 입력받는 것</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">어휘 크기가 너무 커지는 것</button>
+        </div>
+        <div class="quiz-explain">정답: 첫 번째. 다음 토큰 예측 과제에서 미래를 미리 보면 "반칙"이 되므로, 마스크로 과거·현재 위치만 참조하도록 제한합니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch01.html">← 1장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch03.html">3장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>0장. LLM이 만들어지기까지</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch00">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 0</div>
+      <div class="deck-title">LLM이 만들어지기까지</div>
+      <div class="deck-sub">챗봇은 대체 무엇으로 이루어져 있고, 어떻게 똑똑해질까?</div>
+      <div class="title-badges">
+        <span class="badge">🧩 구성 요소</span>
+        <span class="badge">📚 사전 학습</span>
+        <span class="badge">🎯 사후 학습</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">LLM을 이루는 <b>세 가지 구성 요소</b> — 토크나이저 · 모델 · 학습</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>사전 학습</b>이란 무엇이고 왜 필요한가</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>사후 학습</b>(SFT + 강화학습)은 무엇을 더해주는가</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">이 책의 3개 프로젝트(CodeBot·StoryBot·WebBot)와 Part I 개발 흐름</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide section-slide">
+    <div class="slide-inner center">
+      <div class="slide-kicker">0.1</div>
+      <h1>LLM은 사람이 언어를 배우는 과정과 닮았다</h1>
+      <p style="max-width:700px;margin:0 auto;">눈·귀로 언어를 받아들이고, 두뇌로 이해하고 예측하고, 오랜 교육을 거쳐 똑똑해지는 과정 —
+      LLM도 똑같이 <b>토크나이저 · 모델 · 학습</b> 세 가지로 이루어져 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">구성 요소 ① 토크나이저</div>
+      <h1>텍스트를 숫자로 바꾸는 통역사</h1>
+      <div class="analogy">
+        <div class="analogy-label">🗣️ 비유</div>
+        <p>컴퓨터는 글자를 모릅니다. 오직 숫자만 계산할 수 있죠. <b>토크나이저</b>는 "안녕하세요"같은 문장을
+        컴퓨터가 다룰 수 있는 숫자 번호표(토큰 ID)로 바꿔주는 <span class="hi2">동시통역사</span>입니다.
+        모델이 답을 내놓으면, 다시 숫자를 사람이 읽을 수 있는 글자로 되돌려줍니다.</p>
+      </div>
+      <p class="muted">→ 1장에서 문자 단위부터 BPE까지, 이 통역사를 직접 만들어봅니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">구성 요소 ② 모델</div>
+      <h1>다음 토큰을 예측하는 빈칸 채우기의 달인</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧠 비유</div>
+        <p>모델(트랜스포머)은 지금까지 나온 단어들을 보고 "다음에 올 단어는 무엇일까?"를 끊임없이
+        추측하는 <span class="hi2">초고속 빈칸 채우기 선수</span>입니다. 이 추측을 한 글자씩 반복하면
+        어느새 하나의 문장, 하나의 코드가 완성됩니다.</p>
+      </div>
+      <p class="muted">→ 2장에서 이 "추측 엔진"의 핵심 부품인 어텐션과 트랜스포머 구조를 뜯어봅니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">구성 요소 ③ 학습</div>
+      <h1>추측을 점점 잘하게 만드는 교육 과정</h1>
+      <div class="analogy">
+        <div class="analogy-label">🎓 비유</div>
+        <p>처음의 모델은 아무렇게나 추측하는 신입생과 같습니다. <b>학습</b>은 "정답과 얼마나 다른가"(손실)를
+        계산해서, 모델 내부의 수많은 <span class="hi2">파라미터(가중치)</span>를 아주 조금씩 정답 쪽으로
+        고쳐나가는 과정입니다. 이걸 수만 번 반복하면 실력이 쌓입니다.</p>
+      </div>
+      <p class="muted">→ 3장에서 이 교육 과정을 사전 학습 → SFT → 강화 학습 3단계로 나눠 실습합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">0.2 LLM의 사전 학습</div>
+      <h1>사전 학습 = 다독(多讀)으로 세상 상식 쌓기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📖 비유</div>
+        <p>인터넷의 방대한 글(코드, 위키, 뉴스 등)을 모델에게 보여주며 "다음 단어 맞히기" 게임을
+        수십억 번 반복시킵니다. 특정 과목을 콕 집어 가르치는 게 아니라, <span class="hi2">엄청난 양의 책을
+        닥치는 대로 읽히면서</span> 언어의 규칙과 세상의 상식을 저절로 흡수하게 만드는 것과 같습니다.</p>
+      </div>
+      <ul>
+        <li>정답 라벨을 사람이 일일이 달 필요가 없음 — 원문 자체가 정답(다음 글자)</li>
+        <li>그래서 <b>자기지도학습(self-supervised)</b>이라 부름</li>
+        <li>결과물: 문법·상식은 있지만 아직 "대화 예절"은 모르는 모델</li>
+      </ul>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">0.3 LLM의 사후 학습</div>
+      <h1>사후 학습 = 신입사원 실무 코칭</h1>
+      <div class="analogy">
+        <div class="analogy-label">💼 비유</div>
+        <p>다독을 마친 모델은 아는 건 많지만, 질문에 대답하는 형식·태도를 모르는 신입사원과 같습니다.
+        <b>사후 학습</b>은 이 신입사원을 실전에 투입할 수 있게 코칭하는 단계로, 두 단계로 이뤄집니다.</p>
+      </div>
+      <div class="grid2">
+        <div class="card">
+          <h3 style="margin-top:0;">① SFT (지도 파인튜닝)</h3>
+          <p class="small">"질문에는 이렇게 답하세요"라는 <b>모범 답안집</b>을 보여주며 대화 포맷과
+          태도를 따라 하게 만드는 과외 수업.</p>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0;">② 강화 학습 (RL)</h3>
+          <p class="small">직접 여러 번 답을 시도해보고, 잘한 시도는 <b>칭찬(보상)</b>해서 그런 행동을
+          더 하도록 스스로 연습시키는 실전 트레이닝.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>사전 학습 vs 사후 학습, 한눈에 비교</h1>
+      <table class="compare">
+        <tr><th></th><th>사전 학습 (Pre-training)</th><th>사후 학습 (Post-training)</th></tr>
+        <tr><td><b>비유</b></td><td>다독으로 상식 쌓기</td><td>신입사원 실무 코칭</td></tr>
+        <tr><td><b>목표</b></td><td>언어·세상 지식 습득</td><td>대화 형식·유용성·안전성 개선</td></tr>
+        <tr><td><b>데이터</b></td><td>방대한 원문 텍스트</td><td>사람이 정리한 질문-답변 쌍, 보상 신호</td></tr>
+        <tr><td><b>방법</b></td><td>다음 토큰 예측</td><td>SFT(모방) + RL(시행착오)</td></tr>
+        <tr><td><b>비용</b></td><td>매우 큼 (가장 오래 걸림)</td><td>상대적으로 작음</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide section-slide">
+    <div class="slide-inner center">
+      <div class="slide-kicker">Part I</div>
+      <h1>CodeBot 만들기 — 개발 흐름</h1>
+      <p style="max-width:700px;margin:0 auto;">Part I에서는 <b>코드를 짜주는 미니 챗봇, CodeBot</b>을
+      토크나이저부터 강화 학습까지 밑바닥부터 직접 만듭니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">I.1 개발 흐름</div>
+      <h1>CodeBot이 태어나는 4단계</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">
+          <b>토크나이저 학습</b> — TinyCodes 데이터로 BPE 어휘(1,000개)를 학습해 통역사를 준비 <span class="muted">(1장)</span>
+        </div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">
+          <b>사전 학습</b> — GPT-2 구조 모델에 코드 데이터를 "다음 토큰 맞히기"로 반복 학습 <span class="muted">(2·3장)</span>
+        </div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">
+          <b>SFT</b> — Instruction-Response 형식 예시로 대화 포맷을 가르침 <span class="muted">(3장)</span>
+        </div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">
+          <b>강화 학습 (GRPO)</b> — 스스로 답을 여러 번 생성해보고 보상으로 다듬음 <span class="muted">(3장)</span>
+        </div></div>
+      </div>
+      <p class="muted center" style="margin-top:1em;">이 파이프라인은 <code class="inline">codebot/</code> 폴더의 실제 코드로 실습합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>이 책의 세 프로젝트</h1>
+      <div class="grid3">
+        <div class="card">
+          <h3 style="margin-top:0;">CodeBot</h3>
+          <p class="small">Part I · 기본편<br>코드를 생성하는 미니 챗봇. 핵심 원리를 처음부터 끝까지 가장 단순한 형태로 구현.</p>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0;">StoryBot</h3>
+          <p class="small">Part II · 응용편<br>이야기를 만드는 챗봇. RoPE, SwiGLU, AdamW, DPO 등 실전 기법을 더함.</p>
+        </div>
+        <div class="card">
+          <h3 style="margin-top:0;">WebBot</h3>
+          <p class="small">Part III · 도전편<br>더 큰 규모의 챗봇. FlashAttention, MoE, 분산 학습 등 최신 기법으로 확장.</p>
+        </div>
+      </div>
+      <p class="muted center" style="margin-top:1em;">난이도와 규모가 점점 커지는 3단 로켓 구조입니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">정리</div>
+      <h1>0장 핵심 요약</h1>
+      <ul>
+        <li>LLM = <span class="hi">토크나이저</span>(통역사) + <span class="hi">모델</span>(빈칸 채우기 엔진) + <span class="hi">학습</span>(교육 과정)</li>
+        <li><span class="hi2">사전 학습</span>: 방대한 텍스트로 다음 토큰 맞히기 → 언어·상식 습득 (다독)</li>
+        <li><span class="hi2">사후 학습</span>: SFT(모범답안 모방) + RL(시행착오로 개선) → 실전 대화 능력 (코칭)</li>
+        <li>Part I은 CodeBot을 <b>토크나이저 → 사전 학습 → SFT → 강화 학습</b> 순서로 완성</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.4em;">
+        <div class="analogy-label">➡️ 다음 시간</div>
+        <p>1장 <b>토크나이저</b>: 문자 단위 → 바이트 단위 → BPE까지, "통역사"를 직접 만들어봅니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">사전 학습(pre-training) 단계에서 정답 라벨은 누가 만드나요?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">사람이 일일이 정답을 작성해서 붙여준다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">원문 텍스트 자체가 정답(다음 단어) 역할을 한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">보상 모델이 점수를 매겨서 알려준다</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 사전 학습은 방대한 원문에서 "다음 토큰"을 정답으로 삼기 때문에 사람이 따로 라벨링할 필요가 없는 자기지도학습입니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">SFT와 강화 학습(RL)의 차이를 가장 잘 설명한 것은?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">SFT는 모델 구조를 바꾸고, RL은 데이터를 바꾼다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">SFT는 모범 답안을 모방하고, RL은 스스로 시도해보고 보상으로 개선한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">SFT와 RL은 사실상 완전히 같은 방법이다</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. SFT는 예시를 따라 하는 모방 학습, RL은 직접 답을 생성해보고 보상 신호로 확률을 조정하는 시행착오 학습입니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch01.html">1장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

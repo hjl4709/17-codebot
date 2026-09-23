@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>4장. 토크나이저 (응용편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch04">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 4 · PART II</div>
+      <div class="deck-title">토크나이저 (응용편)</div>
+      <div class="deck-sub">StoryBot을 위해 — 똑같은 BPE를 훨씬 더 빠르고 크게 돌리기</div>
+      <div class="title-badges">
+        <span class="badge">⚡ 학습 최적화</span>
+        <span class="badge">🧵 병렬화</span>
+        <span class="badge">📏 대규모 데이터</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <p class="muted">1장에서 만든 BPE는 원리는 맞지만, 데이터가 커지면(StoryBot: 어휘 10,000개, 훨씬 큰 말뭉치) 그대로 쓰기엔 너무 느립니다. 이번 장은 <b>같은 결과를 훨씬 빠르게</b> 내는 4단계 최적화입니다.</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">학습 최적화 — 중복 제거 → 부분 갱신 → 분할 처리 → 병렬화</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">토크나이저 평가 — CodeBot용과 StoryBot용 비교</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">인코딩 최적화 — 고속 병합, 대규모 데이터 처리</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.1 BPE 학습 개선 ① 중복 제거</div>
+      <h1>같은 단어를 100만 번 세지 말고, "100만 번 있음"이라고 적어두기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📦 비유 — 재고 관리</div>
+        <p>텍스트에는 <code class="inline">"the"</code>, <code class="inline">"and"</code> 같은 단어가 수십만 번
+        반복됩니다. 매번 똑같은 ID열을 처음부터 다시 스캔하는 대신, <b>사전 토큰의 종류와 등장 횟수만
+        기록</b>해두면 훨씬 적은 계산으로 같은 결과를 얻을 수 있습니다 — 창고 관리인이 상자를 하나하나
+        세는 대신 "이 상자 1,000개 있음"이라고 재고표에 적어두는 것과 같습니다.</p>
+      </div>
+      <pre class="code"><span class="c"># 이전: 모든 위치를 매번 훑음</span>
+<span class="c"># 개선: (사전 토큰 → 등장 횟수) 로 압축해서 딱 한 번만 기록</span>
+pretoken_counts = defaultdict(int)
+<span class="k">for</span> pretoken <span class="k">in</span> pretokenize(text):
+    pretoken_counts[pretoken] += 1
+
+ids_counts = {tuple(pt.encode(<span class="s">"utf-8"</span>)): cnt <span class="k">for</span> pt, cnt <span class="k">in</span> pretoken_counts.items()}
+<span class="c"># 병합 시 등장 횟수(count)만큼 가중치를 곱해서 집계 → 계산량 대폭 감소</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.2 BPE 학습 개선 ② 부분 갱신</div>
+      <h1>안경을 잃어버렸을 때 온 집을 다 뒤지지 않기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🔍 비유</div>
+        <p>병합을 한 번 할 때마다 <b>전체 데이터를 처음부터 다시 스캔</b>하면 매우 느립니다. 대신
+        "이 쌍이 어느 단어들에 들어있었는지"를 미리 캐시(<code class="inline">pair_to_ids</code>)해두면,
+        병합 후 <span class="hi">영향을 받은 단어들만</span> 골라서 갱신할 수 있습니다 — 안경을 마지막으로
+        본 장소만 확인하면 되지, 집 전체를 다시 뒤질 필요는 없는 것과 같습니다.</p>
+      </div>
+      <pre class="code">pair_to_ids = defaultdict(set)  <span class="c"># 이 쌍이 등장하는 단어들의 캐시</span>
+
+<span class="c"># 병합할 쌍이 포함된 단어만 골라서 갱신</span>
+affected_ids = pair_to_ids[best_pair]
+<span class="k">for</span> ids <span class="k">in</span> affected_ids:
+    <span class="c"># 이 단어의 쌍 정보만 빼고 새로 더함 (± 갱신)</span>
+    ...</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.3 BPE 학습 개선 ③ 분할 처리</div>
+      <h1>큰 이사는 한 트럭에 다 안 실린다</h1>
+      <div class="analogy">
+        <div class="analogy-label">🚚 비유</div>
+        <p>StoryBot 학습 데이터는 파일이 통째로 메모리에 안 들어갈 만큼 큽니다. 그래서 파일을
+        <b>일정 크기의 조각(청크)으로 나눠서 순서대로 읽습니다</b> — 단, 문서 중간이 아니라
+        <code class="inline">&lt;|endoftext|&gt;</code> 근처에서 자르도록 경계를 조정해, 문서가
+        둘로 쪼개지는 것을 방지합니다.</p>
+      </div>
+      <pre class="code"><span class="k">def</span> <span class="f">find_chunk_boundaries</span>(file_path, num_chunks, end_token):
+    <span class="c"># 파일을 num_chunks개로 균등 분할하되,</span>
+    <span class="c"># 각 경계를 가장 가까운 &lt;|endoftext|&gt; 위치로 조정</span>
+    ...
+
+<span class="k">for</span> i <span class="k">in</span> range(total_chunks):
+    chunk_text = read_chunk(file_path, boundaries[i], boundaries[i+1])
+    <span class="c"># 이 조각만 메모리에 올려 처리 → 다음 반복에서 자동 해제</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.4 BPE 학습 개선 ④ 병렬화</div>
+      <h1>혼자 설거지 대신 여덟 명이 나눠서</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧑‍🍳 비유</div>
+        <p>조각 낸 데이터를 <b>여러 프로세스(예: 8개)가 동시에</b> 사전 토큰화하면, 이론상 8배 가까이
+        빨라집니다 — 설거지거리를 혼자 다 하는 대신 여덟 명이 나눠 맡아 동시에 처리하는 것과 같습니다.</p>
+      </div>
+      <pre class="code"><span class="k">from</span> multiprocessing <span class="k">import</span> Pool
+
+<span class="k">with</span> Pool(processes=8) <span class="k">as</span> pool:
+    results = pool.imap(pretoken_chunk, chunk_info_list)  <span class="c"># 8개 프로세스가 동시에 처리</span>
+
+<span class="c"># 결과를 하나로 합쳐서 이후 병합 단계 진행</span></pre>
+      <p class="muted">중복 제거 + 부분 갱신 + 분할 처리 + 병렬화를 모두 합치면, StoryBot(어휘 10,000개)처럼
+      훨씬 큰 규모의 토크나이저도 현실적인 시간 안에 학습할 수 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.5 토크나이저 평가</div>
+      <h1>전문 사전은 전문 분야에서만 잘 맞는다</h1>
+      <div class="analogy">
+        <div class="analogy-label">📖 비유</div>
+        <p>코드 전용으로 학습한 <b>CodeBot 토크나이저</b>를 <b>이야기(story) 텍스트</b>에 사용하면
+        압축률이 떨어집니다 — 요리 전문 사전을 문학 작품 번역에 쓰면 어색한 것과 비슷합니다.
+        토크나이저는 <span class="hi">학습에 사용한 데이터와 비슷한 도메인</span>에서 가장 잘 작동합니다.</p>
+      </div>
+      <pre class="code">sample_text = open(<span class="s">"storybot/tiny_stories_train.txt"</span>).read()[:10000]
+
+<span class="c"># StoryBot 전용 토크나이저(어휘 10,000개, 이야기로 학습)</span>
+storybot_tokenizer.encode(sample_text)   <span class="c"># 압축률 더 높음</span>
+
+<span class="c"># CodeBot 전용 토크나이저(어휘 1,000개, 코드로 학습)를 이야기에 사용</span>
+codebot_tokenizer.encode(sample_text)    <span class="c"># 압축률 더 낮음 (도메인 불일치)</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.6 BPE 인코딩 개선 ① 고속 병합</div>
+      <h1>규칙집을 처음부터 끝까지 다 훑지 않기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📘 비유</div>
+        <p>1장의 인코딩은 <b>학습된 병합 규칙 전부를 순서대로</b> 적용했습니다(규칙이 10,000개면
+        10,000번 스캔). 개선된 방식은 지금 남아있는 인접 쌍들 중 <span class="hi">"가장 먼저 배운
+        (우선순위가 높은) 쌍"</span> 하나만 콕 찾아서 병합하고, 더 병합할 쌍이 없으면 즉시 멈춥니다 —
+        요리책 전체를 순서대로 다 읽는 대신, 지금 냉장고에 있는 재료로 만들 수 있는 "가장 먼저 배운
+        레시피"부터 바로 찾아 적용하는 것과 같습니다.</p>
+      </div>
+      <pre class="code"><span class="k">def</span> <span class="f">get_merge_priority</span>(pair):
+    <span class="k">return</span> merge_rules.get(pair, float(<span class="s">'inf'</span>))  <span class="c"># 없는 쌍은 최하위 우선순위</span>
+
+<span class="k">while</span> len(ids) > 1:
+    counts = count_pairs(ids)
+    best_pair = min(counts, key=get_merge_priority)  <span class="c"># 우선순위가 가장 높은 쌍만 탐색</span>
+    <span class="k">if</span> best_pair <span class="k">not</span> <span class="k">in</span> merge_rules:
+        <span class="k">break</span>                                     <span class="c"># 더 병합할 쌍 없으면 종료</span>
+    ids = merge(ids, best_pair, merge_rules[best_pair])</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.7 BPE 인코딩 개선 ② 대규모 데이터 처리</div>
+      <h1>여러 트럭이 각자 창고 구역에 바로 적재하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🏭 비유</div>
+        <p>전체 학습 데이터를 인코딩할 때도 <b>파일을 청크로 나눠 여러 프로세스가 병렬로 처리</b>합니다.
+        각 결과는 한곳에 모았다가 다시 합치는 대신, <code class="inline">np.memmap</code>(디스크와 직접
+        연결된 배열)의 <span class="hi2">자기 담당 구역에 곧바로 기록</span>합니다 — 트럭마다 짐을
+        중앙 집하장을 거치지 않고 창고의 정해진 자리에 바로 내려놓는 것과 같아 메모리를 절약합니다.</p>
+      </div>
+      <pre class="code">arr = np.memmap(output_file, dtype=np.uint16, mode=<span class="s">'w+'</span>, shape=(total_tokens,))
+
+idx = 0
+<span class="k">for</span> cache_file <span class="k">in</span> cache_files:            <span class="c"># 각 프로세스가 만든 조각 파일</span>
+    chunk_data = np.fromfile(cache_file, dtype=np.uint16)
+    arr[idx : idx+len(chunk_data)] = chunk_data  <span class="c"># 디스크의 제자리에 바로 기록</span>
+    idx += len(chunk_data)</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">4.8 정리</div>
+      <h1>4장 핵심 요약</h1>
+      <ul>
+        <li><b>학습 최적화</b>: 중복 제거(재고표) → 부분 갱신(영향받은 곳만) → 분할 처리(조각내어 읽기) → 병렬화(여러 일꾼)</li>
+        <li>토크나이저는 <b>학습 데이터의 도메인</b>에 맞춰야 압축률이 좋다</li>
+        <li><b>인코딩 최적화</b>: 우선순위 기반 고속 병합 + 병렬·메모리맵 기반 대규모 인코딩</li>
+        <li>원리(1장)는 그대로, <span class="hi">엔지니어링만 개선</span>해 훨씬 큰 데이터를 다룰 수 있게 됨</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">➡️ 다음 시간</div>
+        <p>5장 <b>모델(응용편)</b>: RoPE, SwiGLU, RMSNorm 등으로 GPT-2 구조를 한 단계 업그레이드합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">"부분 갱신" 최적화의 핵심 아이디어는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">모든 단어를 병렬로 처리한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">병합될 쌍이 포함된 단어들만 골라서 갱신한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">파일을 여러 조각으로 나눈다</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. pair_to_ids 캐시로 영향받는 단어만 찾아 갱신하면, 매번 전체 데이터를 다시 스캔하지 않아도 됩니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">CodeBot용 토크나이저를 이야기(스토리) 텍스트에 쓰면 어떤 일이 벌어지나요?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">항상 더 좋은 압축률을 보인다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">도메인이 달라 압축률이 떨어질 수 있다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">오류가 발생해 인코딩이 불가능하다</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 토크나이저는 학습에 쓰인 데이터의 패턴에 최적화되어 있어, 다른 도메인 텍스트에는 상대적으로 비효율적입니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch03.html">← 3장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch05.html">5장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

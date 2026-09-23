@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>6장. 학습 (응용편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch06">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 6 · PART II</div>
+      <div class="deck-title">학습 (응용편)</div>
+      <div class="deck-sub">AdamW · 학습률 스케줄 · 혼합 정밀도 · DPO — StoryBot을 실제로 훈련시키기</div>
+      <div class="title-badges">
+        <span class="badge">🚲 AdamW</span>
+        <span class="badge">🌡️ 혼합 정밀도</span>
+        <span class="badge">⚖️ DPO</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">AdamW 옵티마이저의 원리와 구현</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">학습률 스케줄과 혼합 정밀도</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">StoryBot 사전 학습과 LLM-as-a-Judge 평가</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">RLHF 개요와 DPO 구현</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">6.1 – 6.2 AdamW의 원리와 구현</div>
+      <h1>관성 + 자동 브레이크가 달린 똑똑한 자전거</h1>
+      <div class="analogy">
+        <div class="analogy-label">🚲 비유</div>
+        <p>기본 경사하강법(SGD)은 매 순간의 기울기만 보고 움직입니다. <b>AdamW</b>는 두 가지를 더 봅니다:
+        ① 지금까지 움직여온 <span class="hi2">방향의 관성(1차 모멘트, m)</span> — 언덕을 내려가던
+        방향으로 계속 가속. ② 각 파라미터별로 요동이 컸는지(2차 모멘트, v)를 보고
+        <span class="hi2">보폭을 자동으로 조절</span> — 울퉁불퉁한 길에서는 조심조심, 평탄한 길에서는
+        성큼성큼. 여기에 가중치가 너무 커지지 않도록 <b>별도로 깎아내는 weight decay</b>까지 더합니다.</p>
+      </div>
+      <pre class="code">m = beta1*m + (1-beta1)*grad         <span class="c"># 관성 (모멘텀)</span>
+v = beta2*v + (1-beta2)*grad**2      <span class="c"># 요동의 크기 (적응적 학습률)</span>
+m_hat, v_hat = m/(1-beta1**t), v/(1-beta2**t)   <span class="c"># 초반 편향 보정</span>
+
+<span class="c"># 파라미터 갱신 + 별도의 가중치 감쇠(decoupled weight decay)</span>
+p = p - lr * m_hat / (sqrt(v_hat) + eps) - lr * weight_decay * p</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">6.3 학습률 스케줄</div>
+      <h1>급출발·급정거 없이 서서히 가속·감속</h1>
+      <div class="analogy">
+        <div class="analogy-label">🚗 비유</div>
+        <p>자동차가 출발하자마자 최고 속도로 밟으면 위험하듯, 학습 초반부터 큰 학습률을 쓰면
+        불안정해질 수 있습니다. <b>워밍업</b>(0 → 최대치로 서서히 가속)으로 부드럽게 출발한 뒤,
+        <b>어닐링</b>(최대치 → 0으로 서서히 감속)으로 목적지 근처에서 <span class="hi">정교하게
+        수렴</span>하도록 유도합니다.</p>
+      </div>
+      <pre class="code"><span class="k">def</span> <span class="f">get_lr</span>(it, max_lr, warmup_iters, max_iters):
+    <span class="k">if</span> it < warmup_iters:
+        <span class="k">return</span> max_lr * (it / warmup_iters)          <span class="c"># 워밍업: 0 → max_lr</span>
+    progress = (it - warmup_iters) / (max_iters - warmup_iters)
+    <span class="k">return</span> max_lr * (1.0 - progress)                <span class="c"># 어닐링: max_lr → 0</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">6.4 혼합 정밀도</div>
+      <h1>대부분은 눈대중으로, 중요한 계산은 정밀하게</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧮 비유</div>
+        <p>숫자를 32비트(FP32)로 다루면 정확하지만 느립니다. 16비트로 계산하면 빠르지만,
+        <b>FP16</b>은 표현 범위가 좁아 너무 크거나(70000 → inf) 너무 작은 값(1e-8 → 0)이 깨집니다.
+        <b>BF16</b>은 범위는 FP32만큼 넓게 유지하면서 정밀도만 줄인 절충안입니다. <span class="hi2">
+        행렬곱처럼 규모가 큰 연산은 BF16(빠름)</span>으로, <span class="hi2">합계처럼 정밀도가 중요한
+        연산은 FP32</span>로 자동 전환하는 것이 혼합 정밀도(autocast)입니다.</p>
+      </div>
+      <pre class="code"><span class="k">with</span> torch.autocast(device_type=device, dtype=torch.bfloat16):
+    b = a @ a    <span class="c"># 행렬곱: BF16으로 빠르게</span>
+    c = a.sum()  <span class="c"># 합계: 자동으로 FP32 유지 (정밀도 보호)</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">6.5 사전 학습 (개선 버전)</div>
+      <h1>모든 개선을 합쳐 StoryBot을 실제로 학습</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">5장의 개선된 GPT(RoPE+SwiGLU+RMSNorm)를 <code class="inline">storybot/model.py</code>로 사용</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">AdamW + 워밍업·어닐링 학습률 스케줄 적용</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><code class="inline">autocast(bfloat16)</code>로 혼합 정밀도 학습</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">주기적으로 검증 데이터로 <code class="inline">evaluate()</code> 실행해 과적합 확인</div></div>
+      </div>
+      <p class="muted" style="margin-top:1em;"><code class="inline">python ch06/05_pretrain.py</code> — 어휘 10,000개,
+      임베딩 512차원, 4층 구조로 TinyStories를 학습합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">6.6 텍스트 생성과 모델 평가</div>
+      <h1>사람 대신 AI 채점관에게 첨삭 맡기기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🧑‍🏫 비유 — LLM-as-a-Judge</div>
+        <p>모델이 만든 이야기가 얼마나 자연스러운지 매번 사람이 채점하긴 어렵습니다. 그래서
+        <b>이미 잘 훈련된 다른 AI(GPT-4o-mini)에게 "이 글이 몇 점이야?"라고 채점을 맡깁니다</b> —
+        국어 선생님이 바쁠 때, 글쓰기 실력이 뛰어난 선배에게 첨삭을 부탁하는 것과 비슷합니다.</p>
+      </div>
+      <pre class="code">evaluation_prompt = f<span class="s">"""다음 스토리를 1~5점으로 평가해주세요.
+1. Coherence(일관성)  2. Grammar(문법)
+{story}
+JSON 형식으로 답변해주세요."""</span>
+
+response = client.chat.completions.create(model=<span class="s">"gpt-4o-mini"</span>, ...)
+<span class="c"># 학습 초반(iter 500) vs 후반(iter 40000) 모델의 점수를 비교</span></pre>
+    </div>
+  </section>
+
+  <section class="slide section-slide">
+    <div class="slide-inner center">
+      <div class="slide-kicker">6.7</div>
+      <h1>RLHF와 DPO — 사람의 "취향"을 직접 반영하기</h1>
+      <p style="max-width:700px;margin:0 auto;">사전 학습 + SFT를 마친 모델도 "더 재미있는 결말", "더 안전한 답변"처럼
+      정답이 하나로 딱 떨어지지 않는 <b>취향</b>은 배우지 못합니다. 이를 위한 두 가지 접근을 비교합니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>RLHF vs DPO</h1>
+      <div class="analogy">
+        <div class="analogy-label">🏆 비유 — 심사위원</div>
+        <p><b>RLHF</b>: 먼저 "이게 더 나은 답이다"라는 채점 기준을 학습한 <span class="hi2">별도의
+        심사위원(보상 모델)</span>을 키운 뒤, 그 심사위원 점수에 맞춰 GRPO 같은 강화 학습으로 연습합니다.<br>
+        <b>DPO</b>: 심사위원을 따로 키우지 않고, <span class="hi">"이 답(chosen)이 저 답(rejected)보다
+        낫다"는 비교 데이터만으로 곧장</span> 그 선호를 반영하도록 모델을 직접 조정하는 지름길입니다.</p>
+      </div>
+      <table class="compare">
+        <tr><th></th><th>RLHF</th><th>DPO</th></tr>
+        <tr><td>구성 요소</td><td>보상 모델 + RL 알고리즘</td><td>선호 데이터(chosen/rejected)만</td></tr>
+        <tr><td>구현 복잡도</td><td>높음 (두 단계)</td><td>낮음 (지도학습과 유사)</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">6.8 DPO 구현</div>
+      <h1>둘 중 더 마음에 드는 쪽에 투표하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">🗳️ 비유</div>
+        <p>같은 프롬프트에 대해 <b>선호되는 답(chosen)</b>과 <b>덜 선호되는 답(rejected)</b> 한 쌍이
+        주어지면, "학습 전 원본 모델(참조 모델)" 대비 <span class="hi">chosen을 rejected보다 얼마나
+        더 선호하게 되었는지</span>를 키워가는 방향으로 학습합니다. 원본과 비교하는 이유는, 모델이
+        너무 극단적으로 변하지 않게 붙잡아두는 닻 역할을 하기 때문입니다.</p>
+      </div>
+      <pre class="code">chosen_lp   = get_sequence_logprobs(model, chosen_ids)
+rejected_lp = get_sequence_logprobs(model, rejected_ids)
+ref_chosen_lp   = get_sequence_logprobs(ref_model, chosen_ids)    <span class="c"># 참조 모델(닻)</span>
+ref_rejected_lp = get_sequence_logprobs(ref_model, rejected_ids)
+
+<span class="c"># 참조 모델 대비 "chosen을 더 선호하게 된 정도"</span>
+logits = beta * ((chosen_lp - rejected_lp) - (ref_chosen_lp - ref_rejected_lp))
+loss = -logsigmoid(logits).mean()</pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">6.9 정리</div>
+      <h1>6장 핵심 요약</h1>
+      <ul>
+        <li><b>AdamW</b>: 관성(모멘텀) + 파라미터별 보폭 자동 조절 + 별도의 가중치 감쇠</li>
+        <li><b>학습률 스케줄</b>: 워밍업(서서히 가속) + 어닐링(서서히 감속)</li>
+        <li><b>혼합 정밀도</b>: 대부분 BF16(빠름), 중요한 부분만 FP32(정밀)</li>
+        <li><b>LLM-as-a-Judge</b>로 학습이 잘 되고 있는지 자동 평가</li>
+        <li><b>DPO</b>: 별도 보상 모델 없이 chosen/rejected 비교만으로 "취향"을 직접 학습 → 사람 평가에서 DPO 모델의 승률 상승 확인</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">🎉 Part II 완료</div>
+        <p>토크나이저(4장) → 모델(5장) → 학습(6장)까지, StoryBot을 완성했습니다. Part III에서는
+        더 큰 규모의 WebBot에 도전합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">학습률 워밍업(warmup)을 두는 이유는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">학습을 더 빨리 끝내기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">초반부터 큰 학습률로 불안정해지는 것을 막기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">메모리 사용량을 줄이기 위해</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 학습률을 0에서 서서히 최댓값으로 올려 초반 불안정을 방지합니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">DPO에서 "참조 모델(reference model)"과 비교하는 이유는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">계산 속도를 높이기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">모델이 원본에서 너무 극단적으로 변하지 않도록 붙잡아두기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">토큰 어휘 크기를 맞추기 위해</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 참조 모델 대비 상대적인 선호 변화만 키우도록 해, 학습이 폭주하지 않게 닻 역할을 합니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch05.html">← 5장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="ch07.html">7장 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

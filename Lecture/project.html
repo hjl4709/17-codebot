@@ -1,0 +1,292 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>부록. 프로젝트 코드 둘러보기</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="project">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">APPENDIX</div>
+      <div class="deck-title">프로젝트 코드 둘러보기</div>
+      <div class="deck-sub">codebot / storybot / webbot — 챕터별로 배운 조각들이 실제로 이렇게 합쳐집니다</div>
+      <div class="title-badges">
+        <span class="badge">📁 codebot</span>
+        <span class="badge">📁 storybot</span>
+        <span class="badge">📁 webbot</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <p class="muted">지금까지 0~9장은 개념 하나하나를 <code class="inline">ch01/</code>~<code class="inline">ch09/</code>의
+      작은 실습 스크립트로 배웠습니다. 실제 프로젝트 폴더(<code class="inline">codebot/</code>,
+      <code class="inline">storybot/</code>, <code class="inline">webbot/</code>)는 그 조각들을
+      "완성된 미니 라이브러리"로 모아놓은 것입니다. 이 부록에서는 그 실제 코드와 파일 구조를 훑어봅니다.</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">세 프로젝트의 공통 구조와 <code class="inline">model.py</code>·<code class="inline">tokenizer.py</code>의 진화</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">각 프로젝트의 실행 파이프라인(다운로드 → 학습 → 결과 확인)</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">세 프로젝트를 관통하는 <b>코드 재사용</b> 전략</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">공통 구조</div>
+      <h1>세 프로젝트는 같은 목차의 레시피북이다</h1>
+      <div class="analogy">
+        <div class="analogy-label">📗 비유</div>
+        <p>codebot·storybot·webbot 폴더를 열어보면 구성이 거의 똑같습니다 — 마치 <b>세 권의
+        레시피북이 항상 같은 목차</b>(재료 준비 → 손질법 → 조리 도구)를 따르되, 내용물만 점점
+        고급스러워지는 것과 같습니다.</p>
+      </div>
+      <table class="compare">
+        <tr><th>파일</th><th>역할</th><th>2장에서 배운 것</th></tr>
+        <tr><td><code class="inline">model.py</code></td><td>GPT 모델 정의(트랜스포머 블록들)</td><td>어텐션 · 트랜스포머 블록</td></tr>
+        <tr><td><code class="inline">tokenizer.py</code></td><td>BPE 토크나이저</td><td>1장 · 4장</td></tr>
+        <tr><td><code class="inline">utils.py</code></td><td><code class="inline">generate()</code>, <code class="inline">get_device()</code> 등 보조 함수</td><td>3장 텍스트 생성</td></tr>
+        <tr><td><code class="inline">download.sh</code> / <code class="inline">.ps1</code></td><td>데이터·체크포인트 다운로드 스크립트</td><td>-</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1><code class="inline">model.py</code>의 진화</h1>
+      <p>같은 "GPT 뼈대"(임베딩 → 블록 반복 → 출력)를 유지한 채, 프로젝트마다 <b>부품만 교체</b>됩니다.</p>
+      <table class="compare">
+        <tr><th></th><th>codebot/model.py</th><th>storybot/model.py</th><th>webbot/model.py</th></tr>
+        <tr><td>정규화</td><td>LayerNorm</td><td>RMSNorm</td><td>RMSNorm</td></tr>
+        <tr><td>FFN</td><td>GELU FFN</td><td>SwiGLU</td><td>SwiGLU</td></tr>
+        <tr><td>위치 정보</td><td>절대 위치 임베딩</td><td>RoPE</td><td>RoPE</td></tr>
+        <tr><td>어텐션</td><td>기본 멀티헤드</td><td>+ KV 캐시</td><td>+ <b>GQA</b> + FlashAttention</td></tr>
+        <tr><td>대응 장</td><td>2장</td><td>5장</td><td>8장</td></tr>
+      </table>
+      <p class="muted" style="margin-top:.8em;">즉 <b>storybot/model.py는 2장 GPT + 5장 RoPE·SwiGLU·RMSNorm·KV캐시를
+      합친 것</b>이고, <b>webbot/model.py는 거기에 8장의 GQA를 더한 것</b>입니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1><code class="inline">tokenizer.py</code>의 진화 — 그리고 "재사용"</h1>
+      <div class="analogy">
+        <div class="analogy-label">♻️ 비유</div>
+        <p>WebBot 폴더를 열어보면 <b><code class="inline">tokenizer.py</code>가 아예 없습니다.</b>
+        코드를 또 복사해 넣는 대신, <code class="inline">storybot.tokenizer</code>를 그대로
+        가져다 씁니다 — 이미 검증된 최적화(4장)를 다시 만들 필요가 없기 때문입니다. 좋은 코드는
+        "또 짜는 것"이 아니라 "가져다 쓰는 것"이라는 소프트웨어 공학의 기본 원칙입니다.</p>
+      </div>
+      <pre class="code"><span class="c"># ch07/01_bpe_train.py — WebBot의 토크나이저 학습</span>
+<span class="k">from</span> storybot.tokenizer <span class="k">import</span> train_bpe   <span class="c"># ← webbot 전용 코드가 아니라 storybot 재사용!</span>
+
+merge_rules = train_bpe(<span class="s">"webbot/owt_train.txt"</span>, vocab_size=50000,
+                         num_processes=8, num_chunks=64)</pre>
+      <table class="compare" style="margin-top:.6em;">
+        <tr><th></th><th>codebot</th><th>storybot</th><th>webbot</th></tr>
+        <tr><td>구현</td><td>기본 BPE (1장)</td><td>최적화 BPE (4장: 중복제거·캐시·분할·병렬)</td><td><b>storybot 것을 그대로 import</b></td></tr>
+        <tr><td>어휘 크기</td><td>1,000</td><td>10,000</td><td>50,000</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">CodeBot 파이프라인</div>
+      <h1>codebot/ 폴더가 완성되는 순서</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><code class="inline">download.sh</code> → 코드 텍스트 <code class="inline">tiny_codes.txt</code>(약 6.2MB) 확보</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><code class="inline">ch01/07_tiny_codes.py</code> → 어휘 1,000개 학습, <code class="inline">merge_rules.pkl</code> 저장</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><code class="inline">ch01/09_bpe_encode.py</code> → 전체 텍스트를 <code class="inline">tiny_codes.bin</code>(토큰 ID 배열)으로 변환</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><code class="inline">ch03/01_pretrain.py</code> → <code class="inline">model_pretrain.pt</code> (다음 토큰 예측 학습)</div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-body"><code class="inline">ch03/03_sft.py</code> → <code class="inline">tiny_codes_sft.json</code>(질문-답변 쌍)으로 <code class="inline">model_sft.pt</code> 완성</div></div>
+        <div class="step"><div class="step-num">6</div><div class="step-body"><code class="inline">ch03/09_grpo.py</code> → 강화 학습으로 <code class="inline">model_grpo.pt</code> 완성</div></div>
+        <div class="step"><div class="step-num">7</div><div class="step-body"><code class="inline">ch03/04_chat.py</code> → 완성된 모델과 터미널에서 대화</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>CodeBot의 SFT 데이터 들여다보기</h1>
+      <p><code class="inline">tiny_codes_sft.json</code>은 3장에서 배운 Instruction-Response
+      포맷의 실제 원본 데이터입니다.</p>
+      <pre class="code">[
+  {
+    <span class="s">"instruction"</span>: <span class="s">"Hello"</span>,
+    <span class="s">"response"</span>: <span class="s">"Hello. What can I help you with?"</span>
+  },
+  {
+    <span class="s">"instruction"</span>: <span class="s">"How's life?"</span>,
+    <span class="s">"response"</span>: <span class="s">"I'm functioning well. What can I help you with today?"</span>
+  },
+  ...
+]</pre>
+      <div class="analogy">
+        <div class="analogy-label">🗂️ 비유</div>
+        <p>이 파일이 바로 3.3절에서 말한 "모범 답안집"입니다. <code class="inline">ch03/03_sft.py</code>가
+        이 목록을 하나씩 꺼내 Alpaca 포맷으로 바꾸고, 프롬프트 부분을 마스킹해 학습합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">StoryBot 파이프라인</div>
+      <h1>storybot/ 폴더가 완성되는 순서</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><code class="inline">download.sh</code> → <code class="inline">tiny_stories_train.txt</code> / <code class="inline">valid.txt</code> 확보</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><code class="inline">ch04/04_bpe_parallel.py</code> → 8개 프로세스로 어휘 10,000개 학습</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><code class="inline">ch04/07_encode_parallel.py</code> → <code class="inline">train.bin</code> / <code class="inline">valid.bin</code>으로 병렬 인코딩</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><code class="inline">ch06/05_pretrain.py</code> → RoPE·SwiGLU·RMSNorm 모델을 혼합 정밀도로 학습, 검증 손실 추적</div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-body"><code class="inline">ch06/08_dpo.py</code> → <code class="inline">tiny_stories_dpo.json</code>(선호 데이터)로 <code class="inline">model_dpo.pt</code> 완성</div></div>
+        <div class="step"><div class="step-num">6</div><div class="step-body"><code class="inline">ch06/09_llm_judge.py</code> → LLM 심사로 사전학습 모델 vs DPO 모델 승률 비교</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">WebBot 파이프라인</div>
+      <h1>webbot/ 폴더가 완성되는 순서</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><code class="inline">download.sh</code> → OpenWebText <code class="inline">owt_train.txt</code> / <code class="inline">owt_valid.txt</code> 확보</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><code class="inline">ch07/01_bpe_train.py</code> → storybot 토크나이저 재사용, 어휘 50,000개 학습</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><code class="inline">ch07/02_bpe_encode.py</code> → 병렬 인코딩 + memmap으로 <code class="inline">.bin</code> 생성</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body"><code class="inline">ch09/01_pretrain.py</code> → GQA 모델을 DDP + 기울기 누적 + torch.compile + W&B로 학습</div></div>
+        <div class="step"><div class="step-num">5</div><div class="step-body"><code class="inline">ch09/02_generate.py</code> → 다양한 프롬프트로 생성 품질 확인</div></div>
+      </div>
+      <div class="analogy" style="margin-top:1em;">
+        <div class="analogy-label">💡 눈여겨볼 점</div>
+        <p>WebBot에는 SFT·강화학습 단계가 없습니다 — 이 책에서 WebBot은 <b>"더 큰 규모의 사전 학습을
+        얼마나 효율적으로 해낼 것인가"</b>에 집중하는 도전편이기 때문입니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>세 프로젝트 한눈에 비교</h1>
+      <table class="compare">
+        <tr><th></th><th>CodeBot</th><th>StoryBot</th><th>WebBot</th></tr>
+        <tr><td>데이터</td><td>TinyCodes (코드)</td><td>TinyStories (동화)</td><td>OpenWebText (인터넷 글)</td></tr>
+        <tr><td>어휘 크기</td><td>1,000</td><td>10,000</td><td>50,000</td></tr>
+        <tr><td>컨텍스트 길이</td><td>256</td><td>256</td><td>1,024</td></tr>
+        <tr><td>레이어 수</td><td>6</td><td>4</td><td>12</td></tr>
+        <tr><td>학습 단계</td><td>사전학습 → SFT → GRPO</td><td>사전학습 → DPO</td><td>사전학습만</td></tr>
+        <tr><td>대표 신기술</td><td>기본 트랜스포머</td><td>RoPE·SwiGLU·KV캐시</td><td>GQA·DDP·torch.compile</td></tr>
+      </table>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>코드 재사용 지도</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>CodeBot</b>: 모든 것을 처음부터 직접 구현 (원리 학습이 목적)</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>StoryBot</b>: <code class="inline">model.py</code>·<code class="inline">tokenizer.py</code> 모두 <span class="hi">자체적으로 개선</span>(RoPE 등 추가, BPE 최적화)</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>WebBot</b>: <code class="inline">model.py</code>는 GQA를 더해 <span class="hi">직접 확장</span>하지만, <code class="inline">tokenizer.py</code>는 <span class="hi2">이미 검증된 storybot 것을 그대로 재사용</span></div></div>
+      </div>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">🏗️ 비유</div>
+        <p>세 프로젝트의 관계는 신입 개발자(CodeBot: 모든 걸 배우려고 직접 구현) → 실무자(StoryBot:
+        검증된 패턴으로 개선) → 팀 프로젝트(WebBot: 잘 만든 모듈은 그대로 가져다 쓰고, 새로운 부분에만
+        집중)로 성장하는 과정과 닮았습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <h1>직접 실행해보기</h1>
+      <p>각 프로젝트 폴더에서 다음 순서로 실행하면 처음부터 끝까지 재현할 수 있습니다.</p>
+      <pre class="code"><span class="c"># 1) 데이터·체크포인트 다운로드 (Mac/Linux)</span>
+bash codebot/download.sh      <span class="c"># 또는 storybot/, webbot/</span>
+
+<span class="c"># 2) (직접 학습 대신) 이미 학습된 체크포인트로 건너뛰기</span>
+<span class="c"># download.sh 안의 주석 처리된 wget 줄을 해제하면</span>
+<span class="c"># model_pretrain.pt / model_sft.pt / model_dpo.pt 등을 바로 받을 수 있음</span>
+
+<span class="c"># 3) 대화해보기</span>
+python ch03/04_chat.py        <span class="c"># CodeBot</span></pre>
+      <p class="muted">학습에 시간이 오래 걸린다면, <code class="inline">download.sh</code>의 주석을
+      풀어 사전 학습된 체크포인트를 받아 SFT·DPO·생성 단계부터 바로 실습할 수 있습니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">정리</div>
+      <h1>부록 핵심 요약</h1>
+      <ul>
+        <li>세 프로젝트는 <b>model.py · tokenizer.py · utils.py</b>라는 같은 구조를 공유</li>
+        <li><b>model.py</b>는 2장 GPT-2를 뼈대로, 5장·8장의 부품을 점점 더해가며 진화</li>
+        <li><b>tokenizer.py</b>는 1장 → 4장으로 최적화되고, WebBot은 아예 <span class="hi">storybot 것을 재사용</span> — 검증된 코드는 다시 만들지 않는 것이 좋은 엔지니어링</li>
+        <li>각 프로젝트의 <b>실행 파이프라인</b>(다운로드 → 토크나이저 → 인코딩 → 학습 → 생성)은 형태가 같고 규모만 다름</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.2em;">
+        <div class="analogy-label">🎓 여기까지</div>
+        <p>0장의 "LLM은 토크나이저·모델·학습으로 이루어진다"는 큰 그림이, 실제 코드 3세트로
+        어떻게 구현되는지 확인했습니다. 이제 이 저장소의 어떤 파일을 열어도 "이게 몇 장, 어떤
+        개념에서 왔는지" 스스로 짚어낼 수 있을 것입니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">webbot 폴더에 tokenizer.py가 없는 이유는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">WebBot은 토크나이저가 필요 없는 구조라서</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">이미 검증된 storybot의 토크나이저 구현을 그대로 재사용하기 때문에</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">아직 구현이 완료되지 않아서</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. ch07/01_bpe_train.py는 storybot.tokenizer의 train_bpe를 그대로 import해서 사용합니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">CodeBot과 달리 WebBot 파이프라인에 빠져 있는 학습 단계는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">토크나이저 학습</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">SFT와 강화 학습(RL)</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">사전 학습</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. WebBot은 대규모 사전 학습 효율화에 집중하는 도전편이라, SFT·RL 단계는 다루지 않습니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch09.html">← 9장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="index.html">목차로 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>

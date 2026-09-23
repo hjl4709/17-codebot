@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>9장. 학습 (도전편)</title>
+<link rel="stylesheet" href="assets/style.css">
+</head>
+<body data-deck="ch09">
+<div class="progress-track"><div class="progress-bar" id="progressBar"></div></div>
+<div class="deck">
+
+  <section class="slide title-slide active">
+    <div class="slide-inner center">
+      <div class="slide-kicker">CHAPTER 9 · PART III</div>
+      <div class="deck-title">학습 (도전편)</div>
+      <div class="deck-sub">기울기 누적 · 분산 학습 · W&B — 여러 GPU로 WebBot을 학습시키기</div>
+      <div class="title-badges">
+        <span class="badge">➕ 기울기 누적</span>
+        <span class="badge">🖥️ 분산 학습</span>
+        <span class="badge">📊 W&B</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">Agenda</div>
+      <h1>오늘 배울 것</h1>
+      <p class="muted">WebBot 정도 규모가 되면 GPU 한 대, 배치 하나로는 부족합니다. 이 장에서는
+      <code class="inline">ch09/01_pretrain.py</code>에 실제로 담긴 <b>기울기 누적, 분산 학습(DDP),
+      torch.compile, W&B 로깅</b>과, 개념으로 소개되는 기울기 체크포인트·ZeRO·Muon을 다룹니다.</p>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body">기울기 누적 — 큰 배치를 흉내 내기</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body">기울기 체크포인트 — 메모리와 계산을 맞바꾸기</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body">분산 학습(DDP)과 ZeRO</div></div>
+        <div class="step"><div class="step-num">4</div><div class="step-body">Muon 옵티마이저, W&B, WebBot 최종 결과</div></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.1 기울기 누적</div>
+      <h1>한 번에 못 옮기면, 나눠 옮긴 뒤 한꺼번에 정리</h1>
+      <div class="analogy">
+        <div class="analogy-label">📦 비유</div>
+        <p>GPU 메모리 한계 때문에 한 번에 큰 배치를 처리할 수 없을 때가 많습니다. <b>기울기 누적</b>은
+        작은 배치(micro-batch)를 여러 번 처리하면서 <span class="hi">기울기를 계속 더해두기만
+        하다가, 마지막에 한 번만 파라미터를 갱신</span>합니다 — 큰 짐을 한 번에 옮길 힘이 없을 때
+        여러 번 나눠 옮긴 뒤, 다 모이면 한꺼번에 정리하는 것과 같습니다. 결과적으로 훨씬 큰
+        "유효 배치 크기"로 학습한 것과 같은 효과를 냅니다.</p>
+      </div>
+      <pre class="code">optimizer.zero_grad()
+<span class="k">for</span> micro_step <span class="k">in</span> range(accumulation_steps):    <span class="c"># 예: 4번 나눠서</span>
+    loss = compute_loss(micro_batch) / accumulation_steps
+    loss.backward()                                <span class="c"># 기울기를 계속 누적</span>
+optimizer.step()                                    <span class="c"># 마지막에 한 번만 갱신</span>
+<span class="c"># 유효 배치 크기 = micro_batch_size × accumulation_steps (WebBot: 32 × 4 = 128)</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.2 기울기 체크포인트</div>
+      <h1>모든 풀이 과정 대신 핵심 지점만 메모하기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📝 비유</div>
+        <p>역전파를 하려면 순전파 때의 <b>중간 계산값을 모두 기억</b>해야 하는데, 층이 깊을수록
+        메모리 부담이 커집니다. 기울기 체크포인트는 <span class="hi2">중간 결과를 다 저장하지 않고
+        일부 지점만 메모</span>해뒀다가, 필요할 때 그 지점부터 <b>다시 계산</b>합니다 — 풀이 과정을
+        한 줄 한 줄 다 받아 적는 대신 핵심 단계만 메모해두고, 필요하면 그 지점부터 다시 풀어보는
+        것과 같습니다. <b>메모리는 절약</b>되지만, 다시 계산하는 만큼 <b>속도는 다소 느려지는</b>
+        트레이드오프가 있습니다.</p>
+      </div>
+      <p class="muted">이 저장소의 실습 코드에는 포함되어 있지 않지만, 매우 큰 모델을 제한된
+      GPU 메모리로 학습할 때 널리 쓰이는 기법입니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.3 분산 학습 (DDP)</div>
+      <h1>같은 문제집을 여러 명이 나눠 풀고, 답을 맞춰보기</h1>
+      <div class="analogy">
+        <div class="analogy-label">👥 비유</div>
+        <p>GPU 여러 대에 <b>모델을 각각 복제</b>해두고, 각 GPU가 서로 다른 데이터 배치를 동시에
+        처리합니다. 각자 계산한 기울기를 <span class="hi">주기적으로 서로 맞춰(동기화)</span> 모든
+        GPU가 같은 방향으로 함께 나아가게 합니다 — 같은 문제집을 여러 명이 나눠 풀고, 각자 푼
+        답을 모아 평균 내서 다 같이 다음 단계로 넘어가는 스터디 그룹과 같습니다.</p>
+      </div>
+      <pre class="code"><span class="k">from</span> torch.nn.parallel <span class="k">import</span> DistributedDataParallel <span class="k">as</span> DDP
+
+model = DDP(model, device_ids=[local_rank])   <span class="c"># GPU마다 모델 복제</span>
+<span class="c"># 각 GPU가 다른 배치를 처리하고, backward() 시점에 기울기를 자동으로 평균</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.4 ZeRO</div>
+      <h1>모두가 책 전체를 복사하지 않고, 나눠 갖고 필요할 때 빌리기</h1>
+      <div class="analogy">
+        <div class="analogy-label">📚 비유</div>
+        <p>DDP에서는 모든 GPU가 모델 전체(파라미터+옵티마이저 상태)의 사본을 각자 갖고 있어
+        메모리 낭비가 있습니다. <b>ZeRO</b>는 이 상태들을 <span class="hi2">GPU들끼리 나눠서
+        보관</span>하고, 계산에 필요한 순간에만 서로 주고받습니다 — 스터디 그룹 전원이 두꺼운
+        참고서 전체를 각자 사는 대신, 챕터를 나눠 갖고 필요할 때 서로 빌려보는 것과 같아
+        <b>메모리를 훨씬 아낄 수 있습니다</b>.</p>
+      </div>
+      <p class="muted">이 저장소는 DDP까지만 다루지만, 더 큰 모델일수록 ZeRO(또는 FSDP) 같은
+      상태 분산 기법이 필수가 됩니다.</p>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.5 Muon 옵티마이저</div>
+      <h1>AdamW 다음 세대의 새로운 시도</h1>
+      <div class="analogy">
+        <div class="analogy-label">🌀 비유</div>
+        <p>Muon은 6장의 AdamW와 달리, 파라미터 갱신 방향을 <b>행렬 구조에 맞게 다듬는(직교화)</b>
+        방식을 사용하는 비교적 최신 옵티마이저입니다. 방향의 "결"을 가지런히 정리해 갱신하는
+        느낌으로, 특정 대형 모델 학습에서 AdamW보다 더 빠른 수렴을 보였다는 연구 결과가 있습니다 —
+        아직 활발히 연구되는 최신 기법으로, 이 책에서는 개념만 소개합니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.6 Weights & Biases</div>
+      <h1>실험을 대신 기록해주는 자동 비서</h1>
+      <div class="analogy">
+        <div class="analogy-label">🗒️ 비유</div>
+        <p>여러 GPU로 며칠씩 걸리는 학습을 매번 터미널 로그로 지켜보긴 어렵습니다. <b>W&B(Weights
+        & Biases)</b>는 손실 곡선, 학습률, 하이퍼파라미터를 <span class="hi">실시간 대시보드에
+        자동 기록</span>해주는 비서 역할을 합니다 — 어디서든 웹 브라우저로 실험 진행 상황을
+        확인할 수 있습니다.</p>
+      </div>
+      <pre class="code">wandb.init(project=<span class="s">'webbot-pretrain'</span>, config={...})
+
+<span class="k">for</span> step <span class="k">in</span> range(max_iters):
+    ...
+    wandb.log({<span class="s">'train/loss'</span>: train_loss, <span class="s">'train/lr'</span>: lr}, step=step)  <span class="c"># 매 스텝 기록</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.7 WebBot 학습과 생성 결과</div>
+      <h1>지금까지 배운 모든 것을 한곳에</h1>
+      <div class="step-list">
+        <div class="step"><div class="step-num">1</div><div class="step-body"><b>토크나이저</b>(7장): 어휘 50,000개, OpenWebText 데이터</div></div>
+        <div class="step"><div class="step-num">2</div><div class="step-body"><b>모델</b>(8장): RoPE + SwiGLU + RMSNorm + <b>GQA</b>(n_head=12, n_kv_head=4) + FlashAttention</div></div>
+        <div class="step"><div class="step-num">3</div><div class="step-body"><b>학습</b>(9장): 기울기 누적(유효 배치 128) + <b>DDP</b> 분산 학습 + <code class="inline">torch.compile</code> + 혼합 정밀도 + W&B 로깅</div></div>
+      </div>
+      <pre class="code"><span class="c"># ch09/02_generate.py — 학습된 WebBot에게 프롬프트를 주고 이어쓰기 생성</span>
+prompt = <span class="s">"The capital of Japan is"</span>
+<span class="c"># → 모델이 사전 학습만으로 학습한 상식을 바탕으로 이어서 문장을 생성</span></pre>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="slide-kicker">9.8 정리</div>
+      <h1>9장 & 책 전체 핵심 요약</h1>
+      <ul>
+        <li><b>기울기 누적</b>으로 메모리 한계를 넘는 큰 유효 배치 크기 확보</li>
+        <li><b>기울기 체크포인트</b>: 메모리를 아끼는 대신 일부 재계산 (메모리 ↔ 속도 트레이드오프)</li>
+        <li><b>DDP</b>로 여러 GPU가 서로 다른 데이터를 나눠 처리 후 기울기 동기화, <b>ZeRO</b>는 상태까지 나눠 저장</li>
+        <li><b>W&B</b>로 대규모 실험을 실시간 관리</li>
+      </ul>
+      <div class="analogy" style="margin-top:1.4em;">
+        <div class="analogy-label">🎉 이 책의 여정</div>
+        <p>CodeBot(기본편) → StoryBot(응용편) → WebBot(도전편)까지, <b>토크나이저 → 모델 → 학습</b>
+        3요소를 점점 더 큰 규모로 밑바닥부터 직접 구현해왔습니다. 이제 여러분은 LLM이 어떻게
+        만들어지는지, 블랙박스가 아니라 코드 한 줄 한 줄로 설명할 수 있습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 1</div>
+        <h2 style="margin-top:.4em;">기울기 누적(gradient accumulation)의 목적은?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">학습 속도를 항상 더 빠르게 만들기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">메모리 제약 속에서 더 큰 유효 배치 크기 효과를 내기 위해</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">여러 GPU에 모델을 복제하기 위해</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. 작은 배치 여러 개의 기울기를 누적한 뒤 한 번만 갱신해, 메모리는 적게 쓰면서 큰 배치와 같은 효과를 냅니다.</div>
+      </div>
+    </div>
+  </section>
+
+  <section class="slide">
+    <div class="slide-inner">
+      <div class="quiz">
+        <div class="q-tag">QUIZ 2</div>
+        <h2 style="margin-top:.4em;">DDP와 ZeRO의 가장 큰 차이는?</h2>
+        <div class="quiz-options">
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">DDP는 CPU에서만, ZeRO는 GPU에서만 동작한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, true)">DDP는 모든 GPU가 모델 전체를 복제하지만, ZeRO는 상태를 나눠 보관한다</button>
+          <button class="quiz-opt" onclick="answerQuiz(this, false)">DDP는 토크나이저용, ZeRO는 모델용 기법이다</button>
+        </div>
+        <div class="quiz-explain">정답: 두 번째. DDP는 각 GPU가 전체 모델 사본을 갖지만, ZeRO는 파라미터·옵티마이저 상태를 GPU들끼리 나눠 가져 메모리를 절약합니다.</div>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<div class="nav-bar">
+  <div class="nav-left">
+    <a class="nav-btn home-btn" href="index.html">🏠 목차</a>
+    <a class="nav-btn" href="ch08.html">← 8장</a>
+    <button class="nav-btn" id="prevBtn">← 이전</button>
+  </div>
+  <div class="slide-counter" id="slideCounter"></div>
+  <div class="nav-right">
+    <button class="nav-btn" id="nextBtn">다음 →</button>
+    <a class="nav-btn" href="project.html">부록 →</a>
+  </div>
+</div>
+
+<script src="assets/slides.js"></script>
+</body>
+</html>
