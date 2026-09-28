@@ -1,0 +1,16 @@
+# 가상환경
+.venv/
+
+# 파이썬 캐시
+__pycache__/
+*.pyc
+
+# 주피터
+.ipynb_checkpoints/
+
+# 모델 체크포인트 (각 43MB)
+*.pt
+*.pth
+
+# 토큰화된 학습 데이터 (tiny_codes.txt로 다시 만들 수 있음)
+*.bin
